@@ -1,0 +1,18 @@
+# Defines all the services (containers) needed to run Divvy locally
+services:
+
+  # PostgreSQL database container for local development
+  db:
+    image: postgres:16                  # Official PostgreSQL image, pinned to version 16
+    environment:
+      POSTGRES_USER: divvy              # Database username
+      POSTGRES_PASSWORD: divvy          # Database password (local dev only, not a secret)
+      POSTGRES_DB: divvy                # Name of the database to create on startup
+    ports:
+      - "5432:5432"                     # Expose Postgres on localhost:5432 so Prisma can connect
+    volumes:
+      - divvy_db:/var/lib/postgresql/data   # Persist data so it survives container restarts
+
+# Named volume managed by Podman — database files live here
+volumes:
+  divvy_db:

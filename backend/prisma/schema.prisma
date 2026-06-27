@@ -1,0 +1,72 @@
+// Tells Prisma to generate a TypeScript client for use in our Express app
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Connection URL now lives in prisma.config.ts (Prisma 7 no longer reads it from the schema)
+datasource db {
+  provider = "postgresql"
+}
+
+// A bill-splitting session created by one person and shared with the group
+model Session {
+  id           String        @id @default(uuid())
+  name         String
+  created_at   DateTime      @default(now())
+  participants Participant[]
+  expenses     Expense[]
+  settlements  Settlement[]
+}
+
+// A person in a session who can pay for or owe a share of expenses
+model Participant {
+  id         String         @id @default(uuid())
+  session_id String
+  name       String
+  session    Session        @relation(fields: [session_id], references: [id])
+  expenses   Expense[]
+  splits     ExpenseSplit[]
+  owes       Settlement[]   @relation("Debtor")
+  owed       Settlement[]   @relation("Creditor")
+}
+
+// A single expense logged against a session, paid by one participant
+model Expense {
+  id          String         @id @default(uuid())
+  session_id  String
+  paid_by     String
+  amount      Float
+  description String
+  split_type  SplitType
+  session     Session        @relation(fields: [session_id], references: [id])
+  payer       Participant    @relation(fields: [paid_by], references: [id])
+  splits      ExpenseSplit[]
+}
+
+// How much of a given expense one participant owes
+model ExpenseSplit {
+  id             String      @id @default(uuid())
+  expense_id     String
+  participant_id String
+  amount_owed    Float
+  expense        Expense     @relation(fields: [expense_id], references: [id])
+  participant    Participant @relation(fields: [participant_id], references: [id])
+}
+
+// A computed, simplified payment from one participant to another
+model Settlement {
+  id         String      @id @default(uuid())
+  session_id String
+  from_id    String
+  to_id      String
+  amount     Float
+  session    Session     @relation(fields: [session_id], references: [id])
+  debtor     Participant @relation("Debtor", fields: [from_id], references: [id])
+  creditor   Participant @relation("Creditor", fields: [to_id], references: [id])
+}
+
+// Whether an expense is split equally or with custom per-person amounts
+enum SplitType {
+  EVEN
+  CUSTOM
+}
