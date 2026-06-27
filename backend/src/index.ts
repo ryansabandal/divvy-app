@@ -1,9 +1,12 @@
 import express from "express";
+import cors from "cors";
 import { prisma } from "./db";
 import { sessionsRouter } from "./routes/sessions";
 
 // Single shared Express app instance for the API
 const app = express();
+// Allow the Next.js frontend (different origin: localhost:3000) to call this API from the browser
+app.use(cors());
 // Parse incoming JSON request bodies
 app.use(express.json());
 
