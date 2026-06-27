@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../db";
+import { computeSettlements } from "../lib/settle";
 
 // Sub-router for everything mounted under /api/sessions in index.ts
 export const sessionsRouter = Router();
@@ -75,6 +76,35 @@ sessionsRouter.post("/:sessionId/participants", async (req, res) => {
   });
 
   res.status(201).json(participant);
+});
+
+// PATCH /api/sessions/:sessionId/participants/:participantId — a participant sets their own payment method
+sessionsRouter.patch("/:sessionId/participants/:participantId", async (req, res) => {
+  const { sessionId, participantId } = req.params;
+  const { payment_method_type, payment_details } = req.body;
+
+  const validTypes = ["GCASH", "MAYA", "BANK_TRANSFER"];
+  if (!validTypes.includes(payment_method_type)) {
+    return res.status(400).json({ error: `payment_method_type must be one of ${validTypes.join(", ")}` });
+  }
+  if (typeof payment_details !== "string" || payment_details.trim() === "") {
+    return res.status(400).json({ error: "payment_details is required" });
+  }
+
+  // Scope the lookup to this session, same pattern as the expense delete route
+  const participant = await prisma.participant.findFirst({
+    where: { id: participantId, session_id: sessionId },
+  });
+  if (!participant) {
+    return res.status(404).json({ error: "participant not found in this session" });
+  }
+
+  const updated = await prisma.participant.update({
+    where: { id: participantId },
+    data: { payment_method_type, payment_details },
+  });
+
+  res.json(updated);
 });
 
 // POST /api/sessions/:sessionId/expenses — add an expense, split EVEN across chosen
@@ -165,4 +195,65 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
   });
 
   res.status(201).json(expense);
+});
+
+// DELETE /api/sessions/:sessionId/expenses/:expenseId — remove a mistaken or duplicate expense
+sessionsRouter.delete("/:sessionId/expenses/:expenseId", async (req, res) => {
+  const { sessionId, expenseId } = req.params;
+
+  // Scope the lookup to this session too, so you can't delete another session's expense by id
+  const expense = await prisma.expense.findFirst({
+    where: { id: expenseId, session_id: sessionId },
+  });
+  if (!expense) {
+    return res.status(404).json({ error: "expense not found in this session" });
+  }
+
+  // onDelete: Cascade on ExpenseSplit means its rows are removed in the same operation
+  await prisma.expense.delete({ where: { id: expenseId } });
+
+  res.status(204).send();
+});
+
+// GET /api/sessions/:sessionId/settlements — who owes who, computed fresh from current expenses
+sessionsRouter.get("/:sessionId/settlements", async (req, res) => {
+  const { sessionId } = req.params;
+
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: {
+      participants: true,
+      expenses: { include: { splits: true } },
+    },
+  });
+  if (!session) {
+    return res.status(404).json({ error: "session not found" });
+  }
+
+  // Net balance per participant: what they paid for, minus what they owe across all splits
+  const balances = session.participants.map((participant) => {
+    const paid = session.expenses
+      .filter((e) => e.paid_by === participant.id)
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const owed = session.expenses
+      .flatMap((e) => e.splits)
+      .filter((s) => s.participant_id === participant.id)
+      .reduce((sum, s) => sum + s.amount_owed, 0);
+
+    return { participantId: participant.id, balance: paid - owed };
+  });
+
+  const participantsById = new Map(session.participants.map((p) => [p.id, p]));
+
+  // Attach names so the response is directly readable, not just a list of ids
+  const settlements = computeSettlements(balances).map((s) => ({
+    from_id: s.from_id,
+    from_name: participantsById.get(s.from_id)?.name,
+    to_id: s.to_id,
+    to_name: participantsById.get(s.to_id)?.name,
+    amount: s.amount,
+  }));
+
+  res.json({ settlements });
 });

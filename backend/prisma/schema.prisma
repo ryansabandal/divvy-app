@@ -20,14 +20,17 @@ model Session {
 
 // A person in a session who can pay for or owe a share of expenses
 model Participant {
-  id         String         @id @default(uuid())
-  session_id String
-  name       String
-  session    Session        @relation(fields: [session_id], references: [id])
-  expenses   Expense[]
-  splits     ExpenseSplit[]
-  owes       Settlement[]   @relation("Debtor")
-  owed       Settlement[]   @relation("Creditor")
+  id                  String              @id @default(uuid())
+  session_id          String
+  name                String
+  // Self-entered later via the shared session link, so both are nullable
+  payment_method_type PaymentMethodType?
+  payment_details     String?
+  session             Session             @relation(fields: [session_id], references: [id])
+  expenses            Expense[]
+  splits              ExpenseSplit[]
+  owes                Settlement[]        @relation("Debtor")
+  owed                Settlement[]        @relation("Creditor")
 }
 
 // A single expense logged against a session, paid by one participant
@@ -49,7 +52,7 @@ model ExpenseSplit {
   expense_id     String
   participant_id String
   amount_owed    Float
-  expense        Expense     @relation(fields: [expense_id], references: [id])
+  expense        Expense     @relation(fields: [expense_id], references: [id], onDelete: Cascade)
   participant    Participant @relation(fields: [participant_id], references: [id])
 }
 
@@ -69,4 +72,11 @@ model Settlement {
 enum SplitType {
   EVEN
   CUSTOM
+}
+
+// How a participant wants to receive money owed to them
+enum PaymentMethodType {
+  GCASH
+  MAYA
+  BANK_TRANSFER
 }
