@@ -4,6 +4,8 @@
 
 A simple web app for friend groups to split casual expenses. Core design principle: simpler and less cluttered than Splitwise. No login required — one person creates a session, adds participants, and shares the link.
 
+This file is the spec (what to build). See [README.md](README.md) for current build status, what's actually implemented, and architecture notes.
+
 ## Stack
 
 - **Frontend:** Next.js (React) — deployed on Vercel
@@ -48,14 +50,16 @@ model Session {
 }
 
 model Participant {
-  id          String         @id @default(uuid())
-  session_id  String
-  name        String
-  session     Session        @relation(fields: [session_id], references: [id])
-  expenses    Expense[]
-  splits      ExpenseSplit[]
-  owes        Settlement[]   @relation("Debtor")
-  owed        Settlement[]   @relation("Creditor")
+  id                  String              @id @default(uuid())
+  session_id          String
+  name                String
+  payment_method_type PaymentMethodType?
+  payment_details     String?             // phone number for GCASH/MAYA, "Bank Name - Account Number" for BANK_TRANSFER
+  session             Session             @relation(fields: [session_id], references: [id])
+  expenses            Expense[]
+  splits              ExpenseSplit[]
+  owes                Settlement[]        @relation("Debtor")
+  owed                Settlement[]        @relation("Creditor")
 }
 
 model Expense {
@@ -75,7 +79,7 @@ model ExpenseSplit {
   expense_id     String
   participant_id String
   amount_owed    Float
-  expense        Expense     @relation(fields: [expense_id], references: [id])
+  expense        Expense     @relation(fields: [expense_id], references: [id], onDelete: Cascade)
   participant    Participant @relation(fields: [participant_id], references: [id])
 }
 
@@ -94,13 +98,21 @@ enum SplitType {
   EVEN
   CUSTOM
 }
+
+enum PaymentMethodType {
+  GCASH
+  MAYA
+  BANK_TRANSFER
+}
 ```
 
 ## V1 Features (Strict Scope)
 
 - [x] Create a session (name the bill, add participants)
-- [ ] Add expenses (who paid, how much, description)
-- [ ] Even split or custom amounts per participant
+- [x] Add expenses (who paid, how much, description)
+- [x] Even split or custom amounts per participant
+- [x] Delete an expense (fix mistakes/duplicates)
+- [x] Participant self-enters their payment method via the shared link (GCash/Maya number, or bank name + account number)
 - [ ] Settlement screen — who owes who (minimized transactions)
 - [ ] GCash payment link generation (`gcash.me/<number>/<amount>`)
 - [ ] Maya payment link generation (`maya.ph/pay/<number>`)
@@ -113,6 +125,8 @@ enum SplitType {
 - Push notifications
 - Expense history across sessions
 - Multi-currency
+- Receipt photo upload + auto-parsing (OCR) — deferred to V2
+- QR code upload for payment methods — deferred to V2 alongside OCR; both need file storage infrastructure this stack doesn't have yet, so solve that once for both rather than building it twice
 
 ## Settlement Algorithm
 
@@ -137,14 +151,18 @@ const mayaLink = (number: string, amount: number) =>
   `https://maya.ph/pay/${number}?amount=${amount}`;
 ```
 
+`BANK_TRANSFER` has no equivalent deep link — just display the bank name + account number (`payment_details`) directly for the payer to copy.
+
 ## API Routes
 
 ```
-POST   /api/sessions                          # Create session — done
-GET    /api/sessions/:sessionId               # Get session with participants + expenses — done
-POST   /api/sessions/:sessionId/participants  # Add participant — done
-POST   /api/sessions/:sessionId/expenses      # Add expense — not yet built
-GET    /api/sessions/:sessionId/settlements   # Get computed settlements — not yet built
+POST   /api/sessions                                         # Create session
+GET    /api/sessions/:sessionId                              # Get session with participants + expenses
+POST   /api/sessions/:sessionId/participants                 # Add participant
+PATCH  /api/sessions/:sessionId/participants/:participantId  # Set own payment method
+POST   /api/sessions/:sessionId/expenses                     # Add expense
+DELETE /api/sessions/:sessionId/expenses/:expenseId          # Delete an expense
+GET    /api/sessions/:sessionId/settlements                  # Get computed settlements
 ```
 
 All routes live in `backend/src/routes/sessions.ts` (see the Project Structure section above — participants/expenses/settlements are session-scoped, not split into separate router files).
