@@ -10,7 +10,7 @@ A simple bill-splitting app for friend groups. See [CLAUDE.md](CLAUDE.md) for fu
 | Prisma schema                | ✅ Sessions, participants (+ payment method), expenses, splits, settlements |
 | Express API                  | ✅ All V1 routes built — see table below                  |
 | Settlement algorithm         | ✅ `backend/src/lib/settle.ts`, greedy debt simplification |
-| Frontend (Next.js)           | 🟡 Scaffolded + create-session page done; session view & settle screen pending |
+| Frontend (Next.js)           | 🟡 Create-session + session view (add expense: EVEN/QUANTITY/CUSTOM, per-person breakdown) done; delete-expense & settle screen pending |
 | Railway deployment           | ⬜ Not started                                            |
 | Git / GitHub                 | ✅ Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private) |
 
@@ -124,10 +124,14 @@ frontend/
 ├── app/
 │   ├── layout.tsx      # root layout, metadata
 │   ├── page.tsx        # done: create-session form (name + dynamic participant list), POSTs to /api/sessions, redirects to /{sessionId}
-│   ├── [sessionId]/page.tsx          # not yet built: session view
+│   ├── [sessionId]/page.tsx          # done: session view — SWR fetch, expense list w/ per-person breakdown, add-expense form (3 modes), no delete yet
 │   └── [sessionId]/settle/page.tsx   # not yet built: settlement screen + payment links
 └── .env.local          # NEXT_PUBLIC_API_URL=http://localhost:4000 (NEXT_PUBLIC_ prefix required for any var read in browser-side code)
 ```
+
+**Data fetching:** uses **SWR** (`useSWR`) for client-side GET (not `useEffect`+`useState`) — chosen to satisfy the `react-hooks/set-state-in-effect` lint rule, which discourages fetch-in-effect. `mutate()` refetches after mutations. Form defaults are derived at render (no `setState` in an effect).
+
+**Add-expense form** has three split modes, all posting to `POST .../expenses`: **Evenly** (`EVEN`, participant checkboxes), **Quantity** (`QUANTITY`, total quantity → per-person units, backend computes amounts, "units remaining" guard), **Amount** (`CUSTOM`, per-person pesos, "remaining to split" guard). Amount/units inputs are `type="text"` (no number spinners) and clamp so totals can't exceed the expense.
 
 Backend needed one change to support this: `cors` middleware added in `backend/src/index.ts`, since the frontend (`localhost:3000`) and backend (`localhost:4000`) are different origins and browsers block cross-origin `fetch()` by default.
 
@@ -137,8 +141,9 @@ Single root-level `.gitignore` (covers `node_modules/`, `dist/`, `.env`/`.env.*`
 
 ## Not yet built
 
-- `app/[sessionId]/page.tsx` — session view (participants, expenses list)
+- Delete-expense UI in the session view (`DELETE .../expenses/:expenseId` backend route exists; no button yet)
 - `app/[sessionId]/settle/page.tsx` — settlement screen, GCash/Maya payment link generation, bank transfer detail display (`backend`'s data is ready; this is pure frontend logic per CLAUDE.md's `Payment Links` section)
 - A way for a participant to enter their own payment method via the shared link (`PATCH .../participants/:participantId` is built; no UI for it yet)
+- Design pass: apply the modern/sleek palette (navy/teal/sky-blue/beige/white) across all screens — deferred until functional V1 is done (current styling is placeholder black/white/gray)
 - Railway deployment (Postgres + Express) and Vercel deployment (Next.js)
 - V2 (explicitly deferred, not in V1 scope): receipt photo OCR, QR code upload for payment methods — both need file storage infrastructure this stack doesn't have yet

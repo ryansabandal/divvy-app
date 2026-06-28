@@ -16,6 +16,7 @@ interface ExpenseSplit {
   id: string;
   participant_id: string;
   amount_owed: number;
+  units: number | null;
   participant: Participant;
 }
 
@@ -23,7 +24,8 @@ interface Expense {
   id: string;
   amount: number;
   description: string;
-  split_type: "EVEN" | "CUSTOM";
+  split_type: "EVEN" | "CUSTOM" | "QUANTITY";
+  quantity: number | null;
   payer: Participant;
   splits: ExpenseSplit[];
 }
@@ -61,8 +63,10 @@ export default function SessionPage() {
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState("");
   const [splitWith, setSplitWith] = useState<string[] | null>(null);
-  const [splitType, setSplitType] = useState<"EVEN" | "CUSTOM">("EVEN");
+  const [splitType, setSplitType] = useState<"EVEN" | "CUSTOM" | "QUANTITY">("EVEN");
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
+  const [quantity, setQuantity] = useState("");
+  const [customUnits, setCustomUnits] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -108,6 +112,26 @@ export default function SessionPage() {
     });
   }
 
+  // QUANTITY split: derive unit price + remaining units, and clamp per-person units to the quantity
+  const quantityNum = Number(quantity) || 0;
+  const unitsTotal = allParticipantIds.reduce((sum, id) => sum + (Number(customUnits[id]) || 0), 0);
+  const remainingUnits = quantityNum - unitsTotal;
+  const unitPrice = quantityNum > 0 ? expenseAmount / quantityNum : 0;
+
+  function setCustomUnit(id: string, value: string) {
+    setCustomUnits((prev) => {
+      if (value === "") return { ...prev, [id]: "" };
+      const num = Number(value);
+      if (!Number.isInteger(num) || num < 0) return prev; // whole units only
+      const otherSum = allParticipantIds
+        .filter((pid) => pid !== id)
+        .reduce((s, pid) => s + (Number(prev[pid]) || 0), 0);
+      const cap = Math.max(0, quantityNum - otherSum);
+      if (num > cap) return { ...prev, [id]: String(cap) }; // clamp so units can't exceed quantity
+      return { ...prev, [id]: value };
+    });
+  }
+
   // Validate the form, POST the expense, then mutate() so SWR refetches and shows it
   async function handleAddExpense(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -130,7 +154,8 @@ export default function SessionPage() {
     // Build the split portion of the payload differently for EVEN vs CUSTOM
     let splitPayload:
       | { split_type: "EVEN"; participant_ids: string[] }
-      | { split_type: "CUSTOM"; splits: { participant_id: string; amount_owed: number }[] };
+      | { split_type: "CUSTOM"; splits: { participant_id: string; amount_owed: number }[] }
+      | { split_type: "QUANTITY"; quantity: number; splits: { participant_id: string; units: number }[] };
 
     if (splitType === "EVEN") {
       if (effectiveSplitWith.length === 0) {
@@ -138,7 +163,7 @@ export default function SessionPage() {
         return;
       }
       splitPayload = { split_type: "EVEN", participant_ids: effectiveSplitWith };
-    } else {
+    } else if (splitType === "CUSTOM") {
       // Only include people with a positive amount; the backend requires each split > 0
       const splits = allParticipantIds
         .map((id) => ({ participant_id: id, amount_owed: Number(customAmounts[id]) || 0 }))
@@ -154,6 +179,25 @@ export default function SessionPage() {
         return;
       }
       splitPayload = { split_type: "CUSTOM", splits };
+    } else {
+      // QUANTITY: each person's whole-number units must add up to the total quantity
+      if (!Number.isInteger(quantityNum) || quantityNum <= 0) {
+        setFormError("Enter a whole-number quantity");
+        return;
+      }
+      const splits = allParticipantIds
+        .map((id) => ({ participant_id: id, units: Number(customUnits[id]) || 0 }))
+        .filter((s) => s.units > 0);
+      if (splits.length === 0) {
+        setFormError("Enter units for at least one person");
+        return;
+      }
+      const totalUnits = splits.reduce((s, x) => s + x.units, 0);
+      if (totalUnits !== quantityNum) {
+        setFormError(`${quantityNum - totalUnits} unit(s) still need assigning`);
+        return;
+      }
+      splitPayload = { split_type: "QUANTITY", quantity: quantityNum, splits };
     }
 
     setSubmitting(true);
@@ -182,6 +226,8 @@ export default function SessionPage() {
     setSplitWith(null);
     setSplitType("EVEN");
     setCustomAmounts({});
+    setQuantity("");
+    setCustomUnits({});
     await mutate();
     setSubmitting(false);
   }
@@ -218,13 +264,21 @@ export default function SessionPage() {
                     <span className="font-medium">₱{e.amount.toFixed(2)}</span>
                   </div>
                   <p className="text-sm text-gray-500 mt-1">
-                    Paid by {e.payer.name} · split {e.split_type === "EVEN" ? "evenly" : "custom"}
+                    Paid by {e.payer.name} ·{" "}
+                    {e.split_type === "EVEN"
+                      ? "split evenly"
+                      : e.split_type === "QUANTITY" && e.quantity
+                        ? `${e.quantity} units · ₱${(e.amount / e.quantity).toFixed(2)} each`
+                        : "custom split"}
                   </p>
                   {/* Per-person breakdown of who owes what for this one expense */}
                   <ul className="mt-2 flex flex-col gap-0.5 text-xs text-gray-400">
                     {e.splits.map((s) => (
                       <li key={s.id} className="flex justify-between">
-                        <span>{s.participant.name}</span>
+                        <span>
+                          {s.participant.name}
+                          {s.units != null ? ` ×${s.units}` : ""}
+                        </span>
                         <span>₱{s.amount_owed.toFixed(2)}</span>
                       </li>
                     ))}
@@ -268,26 +322,20 @@ export default function SessionPage() {
               ))}
             </select>
 
-            {/* Toggle between an even split and custom per-person amounts */}
+            {/* Toggle between the three split modes */}
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setSplitType("EVEN")}
-                className={`flex-1 rounded-md border py-2 text-sm font-medium ${
-                  splitType === "EVEN" ? "border-black bg-black text-white" : "border-gray-300"
-                }`}
-              >
-                Split evenly
-              </button>
-              <button
-                type="button"
-                onClick={() => setSplitType("CUSTOM")}
-                className={`flex-1 rounded-md border py-2 text-sm font-medium ${
-                  splitType === "CUSTOM" ? "border-black bg-black text-white" : "border-gray-300"
-                }`}
-              >
-                Custom amounts
-              </button>
+              {(["EVEN", "QUANTITY", "CUSTOM"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setSplitType(mode)}
+                  className={`flex-1 rounded-md border py-2 text-sm font-medium ${
+                    splitType === mode ? "border-black bg-black text-white" : "border-gray-300"
+                  }`}
+                >
+                  {mode === "EVEN" ? "Evenly" : mode === "QUANTITY" ? "Quantity" : "Amount"}
+                </button>
+              ))}
             </div>
 
             {splitType === "EVEN" ? (
@@ -303,6 +351,44 @@ export default function SessionPage() {
                     {p.name}
                   </label>
                 ))}
+              </div>
+            ) : splitType === "QUANTITY" ? (
+              // By quantity: enter total quantity, then each person's units; backend computes amounts
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Total quantity</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  placeholder="e.g. 6"
+                  className="rounded-md border border-gray-300 px-3 py-2 text-base"
+                />
+                {expenseAmount > 0 && quantityNum > 0 ? (
+                  <p className="text-xs text-gray-400">₱{unitPrice.toFixed(2)} per unit</p>
+                ) : (
+                  <p className="text-xs text-gray-400">Enter the amount and quantity first, then assign units.</p>
+                )}
+                {session.participants.map((p) => (
+                  <label key={p.id} className="flex items-center justify-between gap-2 text-base">
+                    <span>{p.name}</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={customUnits[p.id] ?? ""}
+                      onChange={(e) => setCustomUnit(p.id, e.target.value)}
+                      placeholder="0"
+                      disabled={expenseAmount <= 0 || quantityNum <= 0}
+                      className="w-20 rounded-md border border-gray-300 px-2 py-1 text-right text-base disabled:bg-gray-100"
+                    />
+                  </label>
+                ))}
+                <div className="mt-1 flex justify-between text-sm">
+                  <span className="text-gray-500">Units remaining</span>
+                  <span className={quantityNum > 0 && remainingUnits === 0 ? "text-green-600" : "text-gray-500"}>
+                    {remainingUnits}
+                  </span>
+                </div>
               </div>
             ) : (
               // Custom split: enter each person's amount; the remaining balance updates live

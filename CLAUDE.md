@@ -69,6 +69,7 @@ model Expense {
   amount      Float
   description String
   split_type  SplitType
+  quantity    Int?           // total units for a QUANTITY split (e.g. 6 shots); null otherwise
   session     Session        @relation(fields: [session_id], references: [id])
   payer       Participant    @relation(fields: [paid_by], references: [id])
   splits      ExpenseSplit[]
@@ -79,6 +80,7 @@ model ExpenseSplit {
   expense_id     String
   participant_id String
   amount_owed    Float
+  units          Int?        // units this participant consumed in a QUANTITY split; null otherwise
   expense        Expense     @relation(fields: [expense_id], references: [id], onDelete: Cascade)
   participant    Participant @relation(fields: [participant_id], references: [id])
 }
@@ -97,6 +99,7 @@ model Settlement {
 enum SplitType {
   EVEN
   CUSTOM
+  QUANTITY
 }
 
 enum PaymentMethodType {
