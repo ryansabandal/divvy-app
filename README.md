@@ -10,7 +10,7 @@ A simple bill-splitting app for friend groups. See [CLAUDE.md](CLAUDE.md) for fu
 | Prisma schema                | ✅ Sessions, participants (+ payment method), expenses, splits, settlements |
 | Express API                  | ✅ All V1 routes built — see table below                  |
 | Settlement algorithm         | ✅ `backend/src/lib/settle.ts`, greedy debt simplification |
-| Frontend (Next.js)           | 🟡 Create-session + session view (add expense: EVEN/QUANTITY/CUSTOM, per-person breakdown) done; delete-expense & settle screen pending |
+| Frontend (Next.js)           | 🟡 Create-session, session view (add expense: EVEN/QUANTITY/CUSTOM, per-person breakdown, inline payment-method entry), and settle screen (finalize/recalculate/mark-as-paid, GCash/Maya links, bank transfer + copy) done; delete-expense UI & design pass pending |
 | Railway deployment           | ⬜ Not started                                            |
 | Git / GitHub                 | ✅ Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private) |
 
@@ -70,15 +70,19 @@ Prisma 7 removed the `url` field from `schema.prisma` itself. Connection strings
 
 Both ultimately point at the same `DATABASE_URL`, but the CLI and the app each need their own explicit wiring since the schema file no longer carries the connection itself.
 
+### When the dev server seems to be running old code
+
+`npm run dev` uses `ts-node-dev --respawn`, which watches files and restarts on change — but it's occasionally missed an edit and kept serving stale code (and a stale `@prisma/client`, if a migration happened in between). Symptom: a fix that should obviously work doesn't show up when you test it. Check `stat -c '%y %n' <file>` against `ps -o pid,lstart,cmd -p <pid>` for the `ts-node-dev` child process — if the file's mtime is newer than the process start time, restart it (`kill` the process, `npm run dev` again).
+
 ### Data model
 
 Defined in `backend/prisma/schema.prisma`, mirrors the model in CLAUDE.md:
 
 - **Session** — a bill-splitting group; has many participants, expenses, settlements.
-- **Participant** — a person in a session; can pay for expenses, owe splits, owe/be owed settlements. Has an optional `payment_method_type` (`GCASH` | `MAYA` | `BANK_TRANSFER`) and `payment_details`, both nullable since they're self-entered later via the shared link, not at creation time.
+- **Participant** — a person in a session; can pay for expenses, owe splits, owe/be owed settlements. Has an optional `payment_method_type` (`GCASH` | `MAYA` | `BANK_TRANSFER`) and `payment_details`, both nullable since they're self-entered later via the shared link, not at creation time. `sort_order` (an autoincrement int) keeps the participant list in a stable order — `created_at` alone can't do this, since Postgres's `now()` returns the *transaction* start time, so participants created together in one nested write (the normal case) all tie; `sort_order` is a real per-row sequence, immune to that and to later `UPDATE`s reshuffling physical row order.
 - **Expense** — one logged cost, paid by one participant, split `EVEN` or `CUSTOM`.
 - **ExpenseSplit** — per-participant share of one expense. `onDelete: Cascade` on its relation to `Expense`, so deleting an expense removes its splits automatically.
-- **Settlement** — exists in the schema for a future "mark as paid" feature, but V1 doesn't write to this table — `GET .../settlements` computes payments fresh from current expense data every time, rather than persisting a snapshot that could go stale.
+- **Settlement** — a frozen, simplified payment between two participants, with a `paid` boolean. Empty until the plan is finalized: `GET .../settlements` computes a live preview from current expenses when no rows exist yet, but once `POST .../settlements` freezes the plan, that becomes the source of truth and `paid` flags persist across visits.
 
 ### API routes (`backend/src/routes/sessions.ts`)
 
@@ -90,7 +94,9 @@ Defined in `backend/prisma/schema.prisma`, mirrors the model in CLAUDE.md:
 | `PATCH /api/sessions/:sessionId/participants/:participantId` | ✅ | A participant sets their own `payment_method_type` + `payment_details` |
 | `POST /api/sessions/:sessionId/expenses` | ✅ | EVEN (even split across chosen participants) or CUSTOM (manual per-person amounts, must sum to `amount`) |
 | `DELETE /api/sessions/:sessionId/expenses/:expenseId` | ✅ | Removes an expense and its splits (cascade); scoped to the session so you can't delete another session's expense by id |
-| `GET /api/sessions/:sessionId/settlements` | ✅ | Computes net balances per participant, then runs `settle.ts`'s greedy matching; response includes names, not just ids |
+| `GET /api/sessions/:sessionId/settlements` | ✅ | Returns the frozen plan (with `paid` flags) if one exists, else a live unsaved preview computed via `settle.ts`'s greedy matching; response includes names, not just ids |
+| `POST /api/sessions/:sessionId/settlements` | ✅ | Finalizes (freezes) the current preview into persisted `Settlement` rows, each starting `paid: false`. Calling it again — "Recalculate" in the UI — replaces the plan with a fresh one computed from current expenses, resetting any paid progress |
+| `PATCH /api/sessions/:sessionId/settlements/:settlementId` | ✅ | Toggles one frozen payment's `paid` flag; 404s if the settlement isn't part of this session |
 
 All routes are mounted onto one `sessionsRouter` (an Express `Router`) in `sessions.ts`, attached in `index.ts` via `app.use("/api/sessions", sessionsRouter)`. They're kept in a single file rather than split per-resource because every route here is session-scoped — there's no independent top-level `/api/participants` or `/api/expenses`.
 
@@ -98,7 +104,13 @@ Route param is named `:sessionId` (not the generic `:id`) so it stays unambiguou
 
 ### Settlement algorithm (`backend/src/lib/settle.ts`)
 
-A pure function, deliberately kept free of Prisma/database calls: `computeSettlements(balances)` takes a list of `{ participantId, balance }` (positive = owed money, negative = owes money) and returns the minimized list of `{ from_id, to_id, amount }` payments, via greedy debt simplification (sort creditors and debtors by size, repeatedly match the largest of each until both lists empty). The `GET /settlements` route does the I/O — fetching expenses, computing each participant's net balance — then hands the result to this function. Keeping the algorithm itself I/O-free makes it independently testable and easy to reason about.
+A pure function, deliberately kept free of Prisma/database calls: `computeSettlements(balances)` takes a list of `{ participantId, balance }` (positive = owed money, negative = owes money) and returns the minimized list of `{ from_id, to_id, amount }` payments, via greedy debt simplification (sort creditors and debtors by size, repeatedly match the largest of each until both lists empty). The settlements routes do the I/O — fetching expenses, computing each participant's net balance via the `computeNetBalances` helper in `sessions.ts` — then hand the result to this function. Keeping the algorithm itself I/O-free makes it independently testable and easy to reason about.
+
+### Finalize / recalculate / mark-as-paid
+
+The settlement plan starts as a **live preview** — recomputed on every `GET` from current expenses, never persisted. Hitting "Finalize" (`POST .../settlements`) freezes that preview into real `Settlement` rows so individual payments can be checked off (`PATCH`) as people actually pay each other back; this is what makes the progress bar on the settle screen meaningful instead of just a snapshot of the math.
+
+Expenses stay editable at all times, even after finalizing — there's no lock. If something changes after the plan is frozen, "Recalculate" (the same `POST .../settlements` endpoint) replaces the frozen rows with a fresh plan, which resets every payment back to unpaid. We deliberately rejected a harder design (a `Session.finalized` flag that would block adding/deleting expenses until "unfinalized"): in a no-login, shared-link app, a session-wide lock toggled by one participant — that also wipes everyone else's paid progress as a side effect of fixing one missed expense — was worse UX than just trusting people to recalculate when needed.
 
 ### Inspecting the database directly
 
@@ -124,8 +136,8 @@ frontend/
 ├── app/
 │   ├── layout.tsx      # root layout, metadata
 │   ├── page.tsx        # done: create-session form (name + dynamic participant list), POSTs to /api/sessions, redirects to /{sessionId}
-│   ├── [sessionId]/page.tsx          # done: session view — SWR fetch, expense list w/ per-person breakdown, add-expense form (3 modes), no delete yet
-│   └── [sessionId]/settle/page.tsx   # not yet built: settlement screen + payment links
+│   ├── [sessionId]/page.tsx          # done: session view — SWR fetch, expense list w/ per-person breakdown, add-expense form (3 modes, no delete yet), inline payment-method entry per participant, links to /settle
+│   └── [sessionId]/settle/page.tsx   # done: preview/finalize/recalculate + mark-as-paid + progress bar; payment links + bank transfer display not yet built
 └── .env.local          # NEXT_PUBLIC_API_URL=http://localhost:4000 (NEXT_PUBLIC_ prefix required for any var read in browser-side code)
 ```
 
@@ -135,15 +147,18 @@ frontend/
 
 Backend needed one change to support this: `cors` middleware added in `backend/src/index.ts`, since the frontend (`localhost:3000`) and backend (`localhost:4000`) are different origins and browsers block cross-origin `fetch()` by default.
 
+**Payment-method entry** is inline on the session view: tapping a participant's row in "Who's splitting" expands a small form (GCash/Maya/Bank Transfer toggle + a detail input), `PATCH`ing `.../participants/:participantId` on save. No gating by "who you are" — consistent with the rest of the app, anyone with the link can set anyone's payment method.
+
+**Payment links** on the settle screen (`app/[sessionId]/settle/page.tsx`) read each settlement row's creditor's payment method via a second `useSWR` call to `GET /api/sessions/:sessionId` (shares SWR's cache with the session page, so it's often instant). GCash/Maya render as a deep link button (`gcashLink`/`mayaLink` helpers, matching CLAUDE.md's `Payment Links` spec exactly); Bank Transfer has no deep link, so it's shown as plain text with a "Copy" button (Clipboard API) instead, since CLAUDE.md never specified an automatic equivalent for bank transfers. No payment method set yet → a muted "hasn't added a payment method yet" note.
+
 ## Version control
 
 Single root-level `.gitignore` (covers `node_modules/`, `dist/`, `.env`/`.env.*`, `.DS_Store` — applies repo-wide, not per-folder, since `backend/` and `frontend/` are both Node/TS and share the same ignore rules). Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private). As of this writing, `frontend/` and a few other changes (CLAUDE.md/README updates, the `cors` addition) are uncommitted — check `git status` before resuming.
 
 ## Not yet built
 
-- Delete-expense UI in the session view (`DELETE .../expenses/:expenseId` backend route exists; no button yet)
-- `app/[sessionId]/settle/page.tsx` — settlement screen, GCash/Maya payment link generation, bank transfer detail display (`backend`'s data is ready; this is pure frontend logic per CLAUDE.md's `Payment Links` section)
-- A way for a participant to enter their own payment method via the shared link (`PATCH .../participants/:participantId` is built; no UI for it yet)
+- Delete-expense UI in the session view (`DELETE .../expenses/:expenseId` backend route exists; no button yet — predates the settlement-screen work in this README's history, just noticed in passing)
+- Shareable read-only session link — right now there's only one view mode, and anyone with the link can edit anything (add expenses, set anyone's payment method, etc.); a true read-only mode for participants isn't built
 - Design pass: apply the modern/sleek palette (navy/teal/sky-blue/beige/white) across all screens — deferred until functional V1 is done (current styling is placeholder black/white/gray)
 - Railway deployment (Postgres + Express) and Vercel deployment (Next.js)
-- V2 (explicitly deferred, not in V1 scope): receipt photo OCR, QR code upload for payment methods — both need file storage infrastructure this stack doesn't have yet
+- V2 (explicitly deferred, not in V1 scope): receipt photo OCR, QR code upload for payment methods, proof-of-payment screenshot upload — all need file storage infrastructure this stack doesn't have yet

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 
@@ -70,6 +71,13 @@ export default function SessionPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Payment-method form state: which participant's inline form is open, and its fields
+  const [expandedParticipantId, setExpandedParticipantId] = useState<string | null>(null);
+  const [paymentMethodType, setPaymentMethodType] = useState<"GCASH" | "MAYA" | "BANK_TRANSFER">("GCASH");
+  const [paymentDetails, setPaymentDetails] = useState("");
+  const [savingPaymentMethod, setSavingPaymentMethod] = useState(false);
+  const [paymentMethodError, setPaymentMethodError] = useState<string | null>(null);
+
   if (error) {
     return <main className="flex-1 px-4 py-10 text-center text-red-600">{error.message}</main>;
   }
@@ -89,6 +97,49 @@ export default function SessionPage() {
       const current = prev ?? allParticipantIds;
       return current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
     });
+  }
+
+  // Expand one participant's payment-method form, seeded with whatever they already have saved
+  // (or collapse it if it's already open — tapping the same row again closes it)
+  function toggleExpandParticipant(p: Participant) {
+    if (expandedParticipantId === p.id) {
+      setExpandedParticipantId(null);
+      return;
+    }
+    setExpandedParticipantId(p.id);
+    setPaymentMethodType((p.payment_method_type as "GCASH" | "MAYA" | "BANK_TRANSFER") || "GCASH");
+    setPaymentDetails(p.payment_details ?? "");
+    setPaymentMethodError(null);
+  }
+
+  // Save one participant's payment method, then collapse the form and refetch the session
+  async function handleSavePaymentMethod(participantId: string) {
+    setPaymentMethodError(null);
+    if (paymentDetails.trim() === "") {
+      setPaymentMethodError("Enter your payment details");
+      return;
+    }
+
+    setSavingPaymentMethod(true);
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/participants/${participantId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payment_method_type: paymentMethodType, payment_details: paymentDetails.trim() }),
+      },
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setPaymentMethodError(body.error ?? "Failed to save payment method");
+      setSavingPaymentMethod(false);
+      return;
+    }
+
+    setExpandedParticipantId(null);
+    await mutate();
+    setSavingPaymentMethod(false);
   }
 
   // The expense total, how much is already allocated, and what's still left to split
@@ -238,13 +289,68 @@ export default function SessionPage() {
         <h1 className="text-2xl font-semibold mb-1">{session.name}</h1>
         <p className="text-sm text-gray-500 mb-6">{session.participants.length} people</p>
 
-        {/* Participants */}
+        {/* Participants — tap a row to set that person's payment method for the settle screen */}
         <section className="mb-8">
           <h2 className="text-sm font-medium mb-2">Who&apos;s splitting</h2>
-          <ul className="flex flex-wrap gap-2">
+          <ul className="flex flex-col gap-2">
             {session.participants.map((p) => (
-              <li key={p.id} className="rounded-full bg-gray-100 px-3 py-1 text-sm">
-                {p.name}
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => toggleExpandParticipant(p)}
+                  className="flex w-full items-center justify-between rounded-md bg-gray-100 px-3 py-2 text-left text-sm"
+                >
+                  <span>{p.name}</span>
+                  <span className="text-xs text-gray-500">
+                    {p.payment_method_type
+                      ? `${
+                          p.payment_method_type === "GCASH"
+                            ? "GCash"
+                            : p.payment_method_type === "MAYA"
+                              ? "Maya"
+                              : "Bank"
+                        } ✓`
+                      : "Add payment method"}
+                  </span>
+                </button>
+
+                {expandedParticipantId === p.id && (
+                  // Inline form: pick a method, enter the detail, save via PATCH
+                  <div className="mt-2 flex flex-col gap-2 rounded-md border border-gray-200 p-3">
+                    <div className="flex gap-2">
+                      {(["GCASH", "MAYA", "BANK_TRANSFER"] as const).map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => setPaymentMethodType(type)}
+                          className={`flex-1 rounded-md border py-2 text-xs font-medium ${
+                            paymentMethodType === type ? "border-black bg-black text-white" : "border-gray-300"
+                          }`}
+                        >
+                          {type === "GCASH" ? "GCash" : type === "MAYA" ? "Maya" : "Bank Transfer"}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={paymentDetails}
+                      onChange={(e) => setPaymentDetails(e.target.value)}
+                      placeholder={
+                        paymentMethodType === "BANK_TRANSFER" ? "Bank Name - Account Number" : "Phone number"
+                      }
+                      className="rounded-md border border-gray-300 px-3 py-2 text-base"
+                    />
+                    {paymentMethodError && <p className="text-sm text-red-600">{paymentMethodError}</p>}
+                    <button
+                      type="button"
+                      onClick={() => handleSavePaymentMethod(p.id)}
+                      disabled={savingPaymentMethod}
+                      className="rounded-md bg-black text-white py-2 text-sm font-medium disabled:opacity-50"
+                    >
+                      {savingPaymentMethod ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -430,6 +536,14 @@ export default function SessionPage() {
             </button>
           </form>
         </section>
+
+        {/* Settlement screen: who owes who, plus mark-as-paid tracking once finalized */}
+        <Link
+          href={`/${sessionId}/settle`}
+          className="mt-6 block w-full rounded-md border border-black py-3 text-center text-base font-medium"
+        >
+          Settle up
+        </Link>
       </div>
     </main>
   );

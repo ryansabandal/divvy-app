@@ -55,6 +55,8 @@ model Participant {
   name                String
   payment_method_type PaymentMethodType?
   payment_details     String?             // phone number for GCASH/MAYA, "Bank Name - Account Number" for BANK_TRANSFER
+  created_at          DateTime            @default(now())
+  sort_order          Int                 @default(autoincrement()) // keeps participant lists in a stable order; see README for why this can't just be created_at
   session             Session             @relation(fields: [session_id], references: [id])
   expenses            Expense[]
   splits              ExpenseSplit[]
@@ -91,6 +93,7 @@ model Settlement {
   from_id     String
   to_id       String
   amount      Float
+  paid        Boolean     @default(false) // whether this payment has actually been made
   session     Session     @relation(fields: [session_id], references: [id])
   debtor      Participant @relation("Debtor", fields: [from_id], references: [id])
   creditor    Participant @relation("Creditor", fields: [to_id], references: [id])
@@ -114,11 +117,11 @@ enum PaymentMethodType {
 - [x] Create a session (name the bill, add participants)
 - [x] Add expenses (who paid, how much, description)
 - [x] Even split or custom amounts per participant
-- [x] Delete an expense (fix mistakes/duplicates)
+- [ ] Delete an expense (fix mistakes/duplicates) — backend route done, UI pending (predates this session's work, noticed in passing)
 - [x] Participant self-enters their payment method via the shared link (GCash/Maya number, or bank name + account number)
-- [ ] Settlement screen — who owes who (minimized transactions)
-- [ ] GCash payment link generation (`gcash.me/<number>/<amount>`)
-- [ ] Maya payment link generation (`maya.ph/pay/<number>`)
+- [x] Settlement screen — who owes who (minimized transactions), with mark-as-paid tracking against a finalized plan
+- [x] GCash payment link generation (`gcash.me/<number>/<amount>`)
+- [x] Maya payment link generation (`maya.ph/pay/<number>`)
 - [ ] Shareable session link (read-only view for participants)
 
 ## Out of Scope for V1
@@ -130,6 +133,7 @@ enum PaymentMethodType {
 - Multi-currency
 - Receipt photo upload + auto-parsing (OCR) — deferred to V2
 - QR code upload for payment methods — deferred to V2 alongside OCR; both need file storage infrastructure this stack doesn't have yet, so solve that once for both rather than building it twice
+- Proof-of-payment screenshot upload (for other participants to validate a payment) — deferred to V2 alongside OCR/QR upload, same missing file storage infrastructure
 
 ## Settlement Algorithm
 
@@ -165,7 +169,9 @@ POST   /api/sessions/:sessionId/participants                 # Add participant
 PATCH  /api/sessions/:sessionId/participants/:participantId  # Set own payment method
 POST   /api/sessions/:sessionId/expenses                     # Add expense
 DELETE /api/sessions/:sessionId/expenses/:expenseId          # Delete an expense
-GET    /api/sessions/:sessionId/settlements                  # Get computed settlements
+GET    /api/sessions/:sessionId/settlements                  # Get the settlement plan: frozen rows (with paid flags) if finalized, else a live preview
+POST   /api/sessions/:sessionId/settlements                  # Finalize (freeze) the plan; re-calling it later recomputes and resets paid flags
+PATCH  /api/sessions/:sessionId/settlements/:settlementId    # Mark one frozen payment paid or unpaid
 ```
 
 All routes live in `backend/src/routes/sessions.ts` (see the Project Structure section above — participants/expenses/settlements are session-scoped, not split into separate router files).

@@ -26,6 +26,13 @@ model Participant {
   // Self-entered later via the shared session link, so both are nullable
   payment_method_type PaymentMethodType?
   payment_details     String?
+  created_at          DateTime            @default(now())
+  // A monotonic insert sequence, used only to keep participant lists in a stable order.
+  // created_at can't do this alone: Postgres's now() returns the *transaction* start time, so
+  // participants created together in one nested write (the common case) would tie — and an
+  // UPDATE (e.g. setting a payment method) can otherwise make Postgres return rows in a
+  // different physical order than before.
+  sort_order          Int                 @default(autoincrement())
   session             Session             @relation(fields: [session_id], references: [id])
   expenses            Expense[]
   splits              ExpenseSplit[]
@@ -60,13 +67,16 @@ model ExpenseSplit {
   participant    Participant @relation(fields: [participant_id], references: [id])
 }
 
-// A computed, simplified payment from one participant to another
+// A frozen, simplified payment from one participant to another; persisted when the
+// settlement plan is locked in, then flipped to paid as the money actually changes hands
 model Settlement {
   id         String      @id @default(uuid())
   session_id String
   from_id    String
   to_id      String
   amount     Float
+  // Whether this payment has actually been made; toggled from the settle screen
+  paid       Boolean     @default(false)
   session    Session     @relation(fields: [session_id], references: [id])
   debtor     Participant @relation("Debtor", fields: [from_id], references: [id])
   creditor   Participant @relation("Creditor", fields: [to_id], references: [id])
