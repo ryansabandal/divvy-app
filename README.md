@@ -20,7 +20,7 @@ A simple bill-splitting app for friend groups. See [CLAUDE.md](CLAUDE.md) for fu
 Browser
    │
    ▼
-Next.js frontend (not yet built)
+Next.js frontend
    │  HTTP/JSON
    ▼
 Express API  (backend/src/index.ts)
@@ -137,7 +137,7 @@ frontend/
 │   ├── layout.tsx      # root layout, metadata
 │   ├── page.tsx        # done: create-session form (name + dynamic participant list), POSTs to /api/sessions, redirects to /{sessionId}
 │   ├── [sessionId]/page.tsx          # done: session view — SWR fetch, expense list w/ per-person breakdown, add-expense form (3 modes, no delete yet), inline payment-method entry per participant, links to /settle
-│   └── [sessionId]/settle/page.tsx   # done: preview/finalize/recalculate + mark-as-paid + progress bar; payment links + bank transfer display not yet built
+│   └── [sessionId]/settle/page.tsx   # done: preview/finalize/recalculate + mark-as-paid + progress bar + GCash/Maya payment links + bank transfer copy button
 └── .env.local          # NEXT_PUBLIC_API_URL=http://localhost:4000 (NEXT_PUBLIC_ prefix required for any var read in browser-side code)
 ```
 
@@ -153,7 +153,7 @@ Backend needed one change to support this: `cors` middleware added in `backend/s
 
 ## Version control
 
-Single root-level `.gitignore` (covers `node_modules/`, `dist/`, `.env`/`.env.*`, `.DS_Store` — applies repo-wide, not per-folder, since `backend/` and `frontend/` are both Node/TS and share the same ignore rules). Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private). As of this writing, `frontend/` and a few other changes (CLAUDE.md/README updates, the `cors` addition) are uncommitted — check `git status` before resuming.
+Single root-level `.gitignore` (covers `node_modules/`, `dist/`, `.env`/`.env.*`, `.DS_Store` — applies repo-wide, not per-folder, since `backend/` and `frontend/` are both Node/TS and share the same ignore rules). Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private). As of 2026-06-28, the entire settlement screen + payment links + payment-method entry UI (this README's most recent sections) are uncommitted, along with three new migrations — always run `git status` before resuming rather than trusting this note, since it goes stale fast.
 
 ## Not yet built
 
