@@ -5,8 +5,8 @@ import { sessionsRouter } from "./routes/sessions";
 
 // Single shared Express app instance for the API
 const app = express();
-// Allow the Next.js frontend (different origin: localhost:3000) to call this API from the browser
-app.use(cors());
+// Allow only the known frontend origins — localhost for dev, Vercel for production
+app.use(cors({ origin: ["http://localhost:3000", "https://divvy-app-zeta.vercel.app"] }));
 // Parse incoming JSON request bodies
 app.use(express.json());
 
