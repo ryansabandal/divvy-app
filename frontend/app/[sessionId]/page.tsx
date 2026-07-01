@@ -70,11 +70,17 @@ export default function SessionPage() {
   const [customUnits, setCustomUnits] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Which expense is currently being deleted (shows a spinner in that row), and any delete error
+  const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Tracks whether the share-link copy button just fired, to show "Copied!" briefly
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
 
   // Payment-method form state: which participant's inline form is open, and its fields
   const [expandedParticipantId, setExpandedParticipantId] = useState<string | null>(null);
   const [paymentMethodType, setPaymentMethodType] = useState<"GCASH" | "MAYA" | "BANK_TRANSFER">("GCASH");
-  const [paymentDetails, setPaymentDetails] = useState("");
+  const [paymentDetails, setPaymentDetails] = useState(""); // phone number for GCash/Maya; account number for bank transfer
+  const [bankName, setBankName] = useState(""); // bank transfer only — stored combined as "BankName - AccountNumber"
   const [savingPaymentMethod, setSavingPaymentMethod] = useState(false);
   const [paymentMethodError, setPaymentMethodError] = useState<string | null>(null);
 
@@ -108,16 +114,38 @@ export default function SessionPage() {
     }
     setExpandedParticipantId(p.id);
     setPaymentMethodType((p.payment_method_type as "GCASH" | "MAYA" | "BANK_TRANSFER") || "GCASH");
-    setPaymentDetails(p.payment_details ?? "");
     setPaymentMethodError(null);
+
+    // Bank transfer is stored as "Bank Name - Account Number" — split into the two separate fields
+    if (p.payment_method_type === "BANK_TRANSFER" && p.payment_details) {
+      const separatorIndex = p.payment_details.indexOf(" - ");
+      if (separatorIndex !== -1) {
+        setBankName(p.payment_details.slice(0, separatorIndex));
+        setPaymentDetails(p.payment_details.slice(separatorIndex + 3));
+      } else {
+        setBankName("");
+        setPaymentDetails(p.payment_details);
+      }
+    } else {
+      setBankName("");
+      setPaymentDetails(p.payment_details ?? "");
+    }
   }
 
   // Save one participant's payment method, then collapse the form and refetch the session
   async function handleSavePaymentMethod(participantId: string) {
     setPaymentMethodError(null);
-    if (paymentDetails.trim() === "") {
-      setPaymentMethodError("Enter your payment details");
-      return;
+
+    // Bank transfer needs two fields; GCash/Maya just need the phone number
+    let details: string;
+    if (paymentMethodType === "BANK_TRANSFER") {
+      if (bankName.trim() === "") { setPaymentMethodError("Enter the bank name"); return; }
+      if (paymentDetails.trim() === "") { setPaymentMethodError("Enter the account number"); return; }
+      // Combine into the stored format — only the account number is copied on the settle screen
+      details = `${bankName.trim()} - ${paymentDetails.trim()}`;
+    } else {
+      if (paymentDetails.trim() === "") { setPaymentMethodError("Enter your phone number"); return; }
+      details = paymentDetails.trim();
     }
 
     setSavingPaymentMethod(true);
@@ -126,7 +154,7 @@ export default function SessionPage() {
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payment_method_type: paymentMethodType, payment_details: paymentDetails.trim() }),
+        body: JSON.stringify({ payment_method_type: paymentMethodType, payment_details: details }),
       },
     );
 
@@ -140,6 +168,25 @@ export default function SessionPage() {
     setExpandedParticipantId(null);
     await mutate();
     setSavingPaymentMethod(false);
+  }
+
+  // Confirm then DELETE the expense; refetch so the list reflects the removal immediately
+  async function handleDeleteExpense(expenseId: string) {
+    if (!window.confirm("Remove this expense?")) return;
+    setDeleteError(null);
+    setDeletingExpenseId(expenseId);
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/expenses/${expenseId}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setDeleteError(body.error ?? "Failed to delete expense");
+      setDeletingExpenseId(null);
+      return;
+    }
+    await mutate();
+    setDeletingExpenseId(null);
   }
 
   // The expense total, how much is already allocated, and what's still left to split
@@ -284,24 +331,24 @@ export default function SessionPage() {
   }
 
   return (
-    <main className="flex-1 flex flex-col items-center px-4 py-10">
+    <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-semibold mb-1">{session.name}</h1>
-        <p className="text-sm text-gray-500 mb-6">{session.participants.length} people</p>
+        <h1 className="text-2xl font-bold text-navy mb-1">{session.name}</h1>
+        <p className="text-sm text-navy/50 mb-8">{session.participants.length} people</p>
 
         {/* Participants — tap a row to set that person's payment method for the settle screen */}
         <section className="mb-8">
-          <h2 className="text-sm font-medium mb-2">Who&apos;s splitting</h2>
+          <h2 className="section-label">Who&apos;s splitting</h2>
           <ul className="flex flex-col gap-2">
             {session.participants.map((p) => (
               <li key={p.id}>
                 <button
                   type="button"
                   onClick={() => toggleExpandParticipant(p)}
-                  className="flex w-full items-center justify-between rounded-md bg-gray-100 px-3 py-2 text-left text-sm"
+                  className="card flex w-full items-center justify-between px-4 py-3 text-left text-sm"
                 >
-                  <span>{p.name}</span>
-                  <span className="text-xs text-gray-500">
+                  <span className="font-medium text-navy">{p.name}</span>
+                  <span className={`text-xs ${p.payment_method_type ? "text-teal font-medium" : "text-navy/40"}`}>
                     {p.payment_method_type
                       ? `${
                           p.payment_method_type === "GCASH"
@@ -316,36 +363,54 @@ export default function SessionPage() {
 
                 {expandedParticipantId === p.id && (
                   // Inline form: pick a method, enter the detail, save via PATCH
-                  <div className="mt-2 flex flex-col gap-2 rounded-md border border-gray-200 p-3">
+                  <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-navy/10 bg-white p-4 shadow-sm">
                     <div className="flex gap-2">
                       {(["GCASH", "MAYA", "BANK_TRANSFER"] as const).map((type) => (
                         <button
                           key={type}
                           type="button"
                           onClick={() => setPaymentMethodType(type)}
-                          className={`flex-1 rounded-md border py-2 text-xs font-medium ${
-                            paymentMethodType === type ? "border-black bg-black text-white" : "border-gray-300"
-                          }`}
+                          className={`btn-toggle ${paymentMethodType === type ? "btn-toggle-active" : "btn-toggle-inactive"}`}
                         >
-                          {type === "GCASH" ? "GCash" : type === "MAYA" ? "Maya" : "Bank Transfer"}
+                          {type === "GCASH" ? "GCash" : type === "MAYA" ? "Maya" : "Bank"}
                         </button>
                       ))}
                     </div>
-                    <input
-                      type="text"
-                      value={paymentDetails}
-                      onChange={(e) => setPaymentDetails(e.target.value)}
-                      placeholder={
-                        paymentMethodType === "BANK_TRANSFER" ? "Bank Name - Account Number" : "Phone number"
-                      }
-                      className="rounded-md border border-gray-300 px-3 py-2 text-base"
-                    />
-                    {paymentMethodError && <p className="text-sm text-red-600">{paymentMethodError}</p>}
+                    {paymentMethodType === "BANK_TRANSFER" ? (
+                      // Two separate fields — combined on save so only the account number is copied later
+                      <>
+                        <input
+                          type="text"
+                          value={bankName}
+                          onChange={(e) => setBankName(e.target.value)}
+                          placeholder="Bank name (e.g. BPI)"
+                          className="input"
+                        />
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={paymentDetails}
+                          onChange={(e) => setPaymentDetails(e.target.value)}
+                          placeholder="Account number"
+                          className="input"
+                        />
+                      </>
+                    ) : (
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={paymentDetails}
+                        onChange={(e) => setPaymentDetails(e.target.value)}
+                        placeholder="Phone number"
+                        className="input"
+                      />
+                    )}
+                    {paymentMethodError && <p className="text-sm text-red-500">{paymentMethodError}</p>}
                     <button
                       type="button"
                       onClick={() => handleSavePaymentMethod(p.id)}
                       disabled={savingPaymentMethod}
-                      className="rounded-md bg-black text-white py-2 text-sm font-medium disabled:opacity-50"
+                      className="btn-compact self-end disabled:opacity-50"
                     >
                       {savingPaymentMethod ? "Saving…" : "Save"}
                     </button>
@@ -358,18 +423,31 @@ export default function SessionPage() {
 
         {/* Expenses */}
         <section>
-          <h2 className="text-sm font-medium mb-2">Expenses</h2>
+          <h2 className="section-label">Expenses</h2>
+          {deleteError && <p className="mb-2 text-sm text-red-500">{deleteError}</p>}
           {session.expenses.length === 0 ? (
-            <p className="text-sm text-gray-400">No expenses yet.</p>
+            <p className="text-sm text-navy/40">No expenses yet.</p>
           ) : (
             <ul className="flex flex-col gap-3">
               {session.expenses.map((e) => (
-                <li key={e.id} className="rounded-md border border-gray-200 p-3">
-                  <div className="flex justify-between">
-                    <span className="font-medium">{e.description}</span>
-                    <span className="font-medium">₱{e.amount.toFixed(2)}</span>
+                <li key={e.id} className="card-navy p-4">
+                  <div className="flex items-start justify-between">
+                    <span className="font-semibold text-white">{e.description}</span>
+                    <div className="ml-2 flex shrink-0 items-center gap-2">
+                      <span className="font-semibold text-white">₱{e.amount.toFixed(2)}</span>
+                      {/* Delete button: small tap target, grays out while the request is in flight */}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteExpense(e.id)}
+                        disabled={deletingExpenseId === e.id}
+                        aria-label="Delete expense"
+                        className="px-1 text-white/40 transition-colors hover:text-red-400 disabled:opacity-40"
+                      >
+                        {deletingExpenseId === e.id ? "…" : "✕"}
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">
+                  <p className="mt-1 text-sm text-white/60">
                     Paid by {e.payer.name} ·{" "}
                     {e.split_type === "EVEN"
                       ? "split evenly"
@@ -378,7 +456,7 @@ export default function SessionPage() {
                         : "custom split"}
                   </p>
                   {/* Per-person breakdown of who owes what for this one expense */}
-                  <ul className="mt-2 flex flex-col gap-0.5 text-xs text-gray-400">
+                  <ul className="mt-2 flex flex-col gap-0.5 text-xs text-white/50">
                     {e.splits.map((s) => (
                       <li key={s.id} className="flex justify-between">
                         <span>
@@ -396,30 +474,30 @@ export default function SessionPage() {
         </section>
 
         {/* Add an expense */}
-        <section className="mt-8 border-t border-gray-200 pt-6">
-          <h2 className="text-sm font-medium mb-3">Add an expense</h2>
+        <section className="mt-8 border-t border-navy/10 pt-6">
+          <h2 className="section-label">Add an expense</h2>
           <form onSubmit={handleAddExpense} className="flex flex-col gap-3">
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What was it? (e.g. Chili Cheese Fries)"
-              className="rounded-md border border-gray-300 px-3 py-2 text-base"
+              className="input"
             />
             <input
               type="text"
               inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder="Amount"
-              className="rounded-md border border-gray-300 px-3 py-2 text-base"
+              placeholder="Amount (₱)"
+              className="input"
             />
 
-            <label className="text-sm font-medium">Paid by</label>
+            <label className="text-sm font-medium text-navy">Paid by</label>
             <select
               value={effectivePaidBy}
               onChange={(e) => setPaidBy(e.target.value)}
-              className="rounded-md border border-gray-300 px-3 py-2 text-base"
+              className="input"
             >
               {session.participants.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -435,9 +513,7 @@ export default function SessionPage() {
                   key={mode}
                   type="button"
                   onClick={() => setSplitType(mode)}
-                  className={`flex-1 rounded-md border py-2 text-sm font-medium ${
-                    splitType === mode ? "border-black bg-black text-white" : "border-gray-300"
-                  }`}
+                  className={`btn-toggle ${splitType === mode ? "btn-toggle-active" : "btn-toggle-inactive"}`}
                 >
                   {mode === "EVEN" ? "Evenly" : mode === "QUANTITY" ? "Quantity" : "Amount"}
                 </button>
@@ -446,13 +522,14 @@ export default function SessionPage() {
 
             {splitType === "EVEN" ? (
               // Even split: check who shares this expense
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1.5">
                 {session.participants.map((p) => (
-                  <label key={p.id} className="flex items-center gap-2 text-base">
+                  <label key={p.id} className="flex items-center gap-2 text-base text-navy">
                     <input
                       type="checkbox"
                       checked={effectiveSplitWith.includes(p.id)}
                       onChange={() => toggleSplitWith(p.id)}
+                      className="accent-teal"
                     />
                     {p.name}
                   </label>
@@ -461,22 +538,22 @@ export default function SessionPage() {
             ) : splitType === "QUANTITY" ? (
               // By quantity: enter total quantity, then each person's units; backend computes amounts
               <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Total quantity</label>
+                <label className="text-sm font-medium text-navy">Total quantity</label>
                 <input
                   type="text"
                   inputMode="numeric"
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}
                   placeholder="e.g. 6"
-                  className="rounded-md border border-gray-300 px-3 py-2 text-base"
+                  className="input"
                 />
                 {expenseAmount > 0 && quantityNum > 0 ? (
-                  <p className="text-xs text-gray-400">₱{unitPrice.toFixed(2)} per unit</p>
+                  <p className="text-xs text-navy/50">₱{unitPrice.toFixed(2)} per unit</p>
                 ) : (
-                  <p className="text-xs text-gray-400">Enter the amount and quantity first, then assign units.</p>
+                  <p className="text-xs text-navy/40">Enter the amount and quantity first, then assign units.</p>
                 )}
                 {session.participants.map((p) => (
-                  <label key={p.id} className="flex items-center justify-between gap-2 text-base">
+                  <label key={p.id} className="flex items-center justify-between gap-2 text-base text-navy">
                     <span>{p.name}</span>
                     <input
                       type="text"
@@ -485,13 +562,13 @@ export default function SessionPage() {
                       onChange={(e) => setCustomUnit(p.id, e.target.value)}
                       placeholder="0"
                       disabled={expenseAmount <= 0 || quantityNum <= 0}
-                      className="w-20 rounded-md border border-gray-300 px-2 py-1 text-right text-base disabled:bg-gray-100"
+                      className="w-20 rounded-lg border border-navy/20 px-2 py-1 text-right text-base focus:outline-none focus:ring-1 focus:ring-teal/40 disabled:bg-beige"
                     />
                   </label>
                 ))}
                 <div className="mt-1 flex justify-between text-sm">
-                  <span className="text-gray-500">Units remaining</span>
-                  <span className={quantityNum > 0 && remainingUnits === 0 ? "text-green-600" : "text-gray-500"}>
+                  <span className="text-navy/50">Units remaining</span>
+                  <span className={quantityNum > 0 && remainingUnits === 0 ? "font-medium text-teal" : "text-navy/50"}>
                     {remainingUnits}
                   </span>
                 </div>
@@ -500,10 +577,10 @@ export default function SessionPage() {
               // Custom split: enter each person's amount; the remaining balance updates live
               <div className="flex flex-col gap-2">
                 {expenseAmount <= 0 && (
-                  <p className="text-xs text-gray-400">Enter the amount above first, then split it below.</p>
+                  <p className="text-xs text-navy/40">Enter the amount above first, then split it below.</p>
                 )}
                 {session.participants.map((p) => (
-                  <label key={p.id} className="flex items-center justify-between gap-2 text-base">
+                  <label key={p.id} className="flex items-center justify-between gap-2 text-base text-navy">
                     <span>{p.name}</span>
                     <input
                       type="text"
@@ -512,36 +589,42 @@ export default function SessionPage() {
                       onChange={(e) => setCustomAmount(p.id, e.target.value)}
                       placeholder="0.00"
                       disabled={expenseAmount <= 0}
-                      className="w-24 rounded-md border border-gray-300 px-2 py-1 text-right text-base disabled:bg-gray-100"
+                      className="w-24 rounded-lg border border-navy/20 px-2 py-1 text-right text-base focus:outline-none focus:ring-1 focus:ring-teal/40 disabled:bg-beige"
                     />
                   </label>
                 ))}
                 <div className="mt-1 flex justify-between text-sm">
-                  <span className="text-gray-500">Remaining to split</span>
-                  <span className={expenseAmount > 0 && Math.abs(remaining) < 0.01 ? "text-green-600" : "text-gray-500"}>
+                  <span className="text-navy/50">Remaining to split</span>
+                  <span className={expenseAmount > 0 && Math.abs(remaining) < 0.01 ? "font-medium text-teal" : "text-navy/50"}>
                     ₱{remaining.toFixed(2)}
                   </span>
                 </div>
               </div>
             )}
 
-            {formError && <p className="text-sm text-red-600">{formError}</p>}
+            {formError && <p className="text-sm text-red-500">{formError}</p>}
 
-            <button
-              type="submit"
-              disabled={submitting}
-              className="rounded-md bg-black text-white py-3 text-base font-medium disabled:opacity-50"
-            >
+            <button type="submit" disabled={submitting} className="btn-primary">
               {submitting ? "Adding…" : "Add expense"}
             </button>
           </form>
         </section>
 
-        {/* Settlement screen: who owes who, plus mark-as-paid tracking once finalized */}
-        <Link
-          href={`/${sessionId}/settle`}
-          className="mt-6 block w-full rounded-md border border-black py-3 text-center text-base font-medium"
+        {/* Share a read-only link with participants so they can see what they owe */}
+        <button
+          type="button"
+          onClick={async () => {
+            await navigator.clipboard.writeText(`${window.location.origin}/${sessionId}/view`);
+            setCopiedShareLink(true);
+            setTimeout(() => setCopiedShareLink(false), 2000);
+          }}
+          className="btn-secondary mt-6"
         >
+          {copiedShareLink ? "Link copied!" : "Share view link"}
+        </button>
+
+        {/* Settlement screen: who owes who, plus mark-as-paid tracking once finalized */}
+        <Link href={`/${sessionId}/settle`} className="btn-primary mt-3">
           Settle up
         </Link>
       </div>

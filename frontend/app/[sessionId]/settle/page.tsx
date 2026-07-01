@@ -35,11 +35,6 @@ interface Session {
   participants: Participant[];
 }
 
-// GCash/Maya deep links per CLAUDE.md's Payment Links spec; bank transfer has no equivalent
-const gcashLink = (number: string, amount: number) => `https://gcash.me/${encodeURIComponent(number)}/${amount.toFixed(2)}`;
-const mayaLink = (number: string, amount: number) =>
-  `https://maya.ph/pay/${encodeURIComponent(number)}?amount=${amount.toFixed(2)}`;
-
 // SWR calls this with the URL key; returns parsed JSON or throws on a bad response
 const fetcher = (url: string) =>
   fetch(url).then((res) => {
@@ -79,57 +74,51 @@ export default function SettlePage() {
   }
 
   if (error) {
-    return <main className="flex-1 px-4 py-10 text-center text-red-600">{error.message}</main>;
+    return <main className="flex-1 px-4 py-10 text-center text-red-500">{error.message}</main>;
   }
   if (!data) {
-    return <main className="flex-1 px-4 py-10 text-center text-gray-500">Loading…</main>;
+    return <main className="flex-1 px-4 py-10 text-center text-navy/40">Loading…</main>;
   }
 
   const { frozen, settlements } = data;
   const participantsById = new Map((session?.participants ?? []).map((p) => [p.id, p]));
 
-  // Render how the debtor should pay the creditor for one row, based on the creditor's saved method
+  // Render how the debtor should pay the creditor for one row, based on the creditor's saved method.
+  // None of GCash/Maya/Bank offer a working public deep link, so all three show the detail + a Copy
+  // button — the payer copies the number/account and pays inside the relevant app themselves.
   function renderPaymentAction(s: Settlement) {
     const creditor = participantsById.get(s.to_id);
     if (!creditor || !creditor.payment_method_type || !creditor.payment_details) {
-      return <p className="text-xs text-gray-400">{s.to_name} hasn&apos;t added a payment method yet</p>;
+      return <p className="text-xs text-navy/40">{s.to_name} hasn&apos;t added a payment method yet</p>;
     }
 
-    if (creditor.payment_method_type === "GCASH") {
-      return (
-        <a
-          href={gcashLink(creditor.payment_details, s.amount)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block w-full rounded-md border border-black py-2 text-center text-sm font-medium"
-        >
-          Pay via GCash
-        </a>
-      );
+    // Bank transfer is stored as "Bank Name - Account Number" — show bank name as label,
+    // display and copy only the account number so the payer doesn't accidentally include the bank name
+    let methodLabel: string;
+    let displayText: string;
+    let copyText: string;
+    if (creditor.payment_method_type === "BANK_TRANSFER") {
+      const separatorIndex = creditor.payment_details.indexOf(" - ");
+      methodLabel = separatorIndex !== -1 ? creditor.payment_details.slice(0, separatorIndex) : "Bank";
+      displayText = separatorIndex !== -1 ? creditor.payment_details.slice(separatorIndex + 3) : creditor.payment_details;
+      copyText = displayText;
+    } else {
+      methodLabel = creditor.payment_method_type === "GCASH" ? "GCash" : "Maya";
+      displayText = creditor.payment_details;
+      copyText = creditor.payment_details;
     }
 
-    if (creditor.payment_method_type === "MAYA") {
-      return (
-        <a
-          href={mayaLink(creditor.payment_details, s.amount)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block w-full rounded-md border border-black py-2 text-center text-sm font-medium"
-        >
-          Pay via Maya
-        </a>
-      );
-    }
-
-    // BANK_TRANSFER has no deep link (per CLAUDE.md) — just the detail string, with a copy button
     const key = s.id ?? `${s.from_id}-${s.to_id}`;
     return (
-      <div className="flex items-center justify-between gap-2 rounded-md bg-gray-50 px-3 py-2">
-        <span className="text-sm">{creditor.payment_details}</span>
+      <div className="flex items-center justify-between gap-2 rounded-xl bg-beige px-3 py-2">
+        <span className="text-sm text-navy">
+          <span className="text-navy/40">{methodLabel} · </span>
+          {displayText}
+        </span>
         <button
           type="button"
-          onClick={() => handleCopy(creditor.payment_details!, key)}
-          className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium"
+          onClick={() => handleCopy(copyText, key)}
+          className="btn-compact shrink-0"
         >
           {copiedKey === key ? "Copied!" : "Copy"}
         </button>
@@ -194,29 +183,29 @@ export default function SettlePage() {
   const progressPct = settlements.length > 0 ? (paidSettlements.length / settlements.length) * 100 : 0;
 
   return (
-    <main className="flex-1 flex flex-col items-center px-4 py-10">
+    <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-semibold mb-1">Settle up</h1>
-        <p className="text-sm text-gray-500 mb-6">
+        <h1 className="text-2xl font-bold text-navy mb-1">Settle up</h1>
+        <p className="text-sm text-navy/50 mb-8">
           {frozen ? "Track who's paid back" : "Who owes who, with the fewest payments"}
         </p>
 
         {settlements.length === 0 ? (
           // Either nobody owes anything, or a frozen plan with zero rows looks identical to a
           // preview with zero rows — either way there's nothing to track, so no button below
-          <p className="text-sm text-gray-400">🎉 All settled up — no payments needed.</p>
+          <p className="text-sm text-navy/40">🎉 All settled up — no payments needed.</p>
         ) : (
           <>
             {frozen && (
               // Progress bar: how much of the frozen plan has actually been paid back
-              <div className="mb-4">
-                <div className="h-2 w-full rounded-full bg-gray-100">
+              <div className="mb-6">
+                <div className="h-2 w-full rounded-full bg-navy/10">
                   <div
-                    className="h-2 rounded-full bg-green-500 transition-all"
+                    className="h-2 rounded-full bg-teal transition-all"
                     style={{ width: `${progressPct}%` }}
                   />
                 </div>
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1.5 text-xs text-navy/50">
                   {paidSettlements.length} of {settlements.length} paid · ₱{paidAmount.toFixed(2)} of ₱
                   {totalAmount.toFixed(2)}
                 </p>
@@ -227,9 +216,7 @@ export default function SettlePage() {
               {settlements.map((s) => (
                 <li
                   key={s.id ?? `${s.from_id}-${s.to_id}`}
-                  className={`flex flex-col gap-2 rounded-md border p-3 ${
-                    s.paid ? "border-green-200 bg-green-50" : "border-gray-200"
-                  }`}
+                  className={`card flex flex-col gap-2 p-4 ${s.paid ? "border-teal/20 bg-teal/5" : ""}`}
                 >
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-3">
@@ -239,15 +226,16 @@ export default function SettlePage() {
                           type="checkbox"
                           checked={!!s.paid}
                           onChange={() => handleTogglePaid(s.id!, !!s.paid)}
+                          className="accent-teal"
                         />
                       )}
-                      <span className={`text-base ${s.paid ? "text-gray-400 line-through" : ""}`}>
-                        <span className="font-medium">{s.from_name}</span>
-                        <span className="text-gray-400"> → </span>
-                        <span className="font-medium">{s.to_name}</span>
+                      <span className={`text-base ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
+                        <span className="font-semibold">{s.from_name}</span>
+                        <span className="text-navy/30"> → </span>
+                        <span className="font-semibold">{s.to_name}</span>
                       </span>
                     </label>
-                    <span className={`font-medium ${s.paid ? "text-gray-400 line-through" : ""}`}>
+                    <span className={`font-semibold ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
                       ₱{s.amount.toFixed(2)}
                     </span>
                   </div>
@@ -258,11 +246,11 @@ export default function SettlePage() {
               ))}
             </ul>
 
-            {actionError && <p className="mt-4 text-sm text-red-600">{actionError}</p>}
+            {actionError && <p className="mt-4 text-sm text-red-500">{actionError}</p>}
             <button
               type="button"
               onClick={frozen ? handleRecalculate : handleFinalize}
-              className="mt-6 w-full rounded-md bg-black text-white py-3 text-base font-medium"
+              className={frozen ? "btn-secondary mt-6" : "btn-primary mt-6"}
             >
               {frozen ? "Recalculate" : "Finalize Expenses"}
             </button>
@@ -270,7 +258,7 @@ export default function SettlePage() {
         )}
 
         {/* Back to the session view to keep editing expenses */}
-        <Link href={`/${sessionId}`} className="mt-4 block text-center text-sm text-gray-500 underline">
+        <Link href={`/${sessionId}`} className="mt-4 block text-center text-sm text-navy/40 underline">
           ← Back to expenses
         </Link>
       </div>

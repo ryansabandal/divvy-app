@@ -21,8 +21,9 @@ divvy/
 ├── frontend/
 │   └── app/
 │       ├── page.tsx                          # Create session
-│       ├── [sessionId]/page.tsx              # Session view
-│       └── [sessionId]/settle/page.tsx       # Settlement screen
+│       ├── [sessionId]/page.tsx              # Session view (edit)
+│       ├── [sessionId]/settle/page.tsx       # Settlement screen
+│       └── [sessionId]/view/page.tsx         # Read-only participant view
 ├── backend/
 │   ├── src/
 │   │   ├── index.ts                          # Express app entrypoint
@@ -118,12 +119,12 @@ enum PaymentMethodType {
 - [x] Create a session (name the bill, add participants)
 - [x] Add expenses (who paid, how much, description)
 - [x] Even split or custom amounts per participant
-- [ ] Delete an expense (fix mistakes/duplicates) — backend route done, UI pending (predates this session's work, noticed in passing)
-- [x] Participant self-enters their payment method via the shared link (GCash/Maya number, or bank name + account number)
+- [x] Delete an expense (fix mistakes/duplicates)
+- [x] Participant self-enters their payment method via the shared link — GCash/Maya phone number, or bank name + account number entered as separate fields (stored combined as `"Bank Name - Account Number"`; only the account number is copied on the settle screen)
 - [x] Settlement screen — who owes who (minimized transactions), with mark-as-paid tracking against a finalized plan
-- [x] GCash payment link generation (`gcash.me/<number>/<amount>`)
-- [x] Maya payment link generation (`maya.ph/pay/<number>`)
-- [ ] Shareable session link (read-only view for participants)
+- [x] Display each participant's GCash/Maya number or bank account on the settle screen with a copy button so the payer can initiate the transfer themselves inside the relevant app
+- [x] Shareable read-only session link (`/[sessionId]/view`) — expense breakdown + settlement plan, no edit controls; "Share view link" button on the session page copies the URL to clipboard
+- [x] Design pass — navy/teal/sky-blue/beige/white palette; sticky navy header with Divvy wordmark; Tailwind v4 with plain CSS component classes (no `@apply` — Turbopack bypasses PostCSS, so `@apply` is never processed)
 
 ## Out of Scope for V1
 
@@ -133,7 +134,7 @@ enum PaymentMethodType {
 - Expense history across sessions
 - Multi-currency
 - Receipt photo upload + auto-parsing (OCR) — deferred to V2
-- QR code upload for payment methods — deferred to V2 alongside OCR; both need file storage infrastructure this stack doesn't have yet, so solve that once for both rather than building it twice
+- QR Ph code upload for payment methods — the intended V2 end-state; GCash, Maya, and most bank apps can scan QR Ph so the payer just scans instead of copying a number. Deferred alongside OCR; both need file storage infrastructure this stack doesn't have yet, so solve that once for both
 - Proof-of-payment screenshot upload (for other participants to validate a payment) — deferred to V2 alongside OCR/QR upload, same missing file storage infrastructure
 
 ## Settlement Algorithm
@@ -147,19 +148,20 @@ Use greedy debt simplification to minimize the number of transactions:
 
 This is the standard approach used by Splitwise. Implement in `backend/src/lib/settle.ts`.
 
-## Payment Links
+## Payment Display
 
-```typescript
-// GCash
-const gcashLink = (number: string, amount: number) =>
-  `https://gcash.me/${number}/${amount}`;
+Neither GCash nor Maya exposes a public deep-link URL that pre-fills a peer transfer — payments happen inside the authenticated app after the user is already logged in. Attempting to construct one (e.g. `gcash.me/<number>/<amount>`) produces a broken or useless link.
 
-// Maya
-const mayaLink = (number: string, amount: number) =>
-  `https://maya.ph/pay/${number}?amount=${amount}`;
-```
+**V1 approach (all three methods):** Show the payment detail with a label and a copy-to-clipboard button. The payer reads the amount from the settlement row, copies the number/account, and completes the transfer inside the relevant app themselves.
 
-`BANK_TRANSFER` has no equivalent deep link — just display the bank name + account number (`payment_details`) directly for the payer to copy.
+- **GCash / Maya:** label is `GCash ·` or `Maya ·`; the full phone number is displayed and copied.
+- **Bank Transfer:** entry form accepts bank name and account number as two separate inputs; stored in `payment_details` as `"Bank Name - Account Number"`. On the settle screen the bank name is used as the label (e.g. `BPI ·`) and **only the account number is copied** — pasting the bank name alongside the account number would be confusing and serve no purpose.
+
+**V2 target — QR Ph codes:** QR Ph is the BSP-standardised interoperable payment QR standard. GCash and Maya both support it, and most bank apps can scan it too. The intended V2 flow is:
+1. Each participant uploads or generates their QR Ph code when entering their payment method.
+2. The settle screen displays the QR image directly so the payer can scan it in-app.
+
+QR Ph code upload needs file-storage infrastructure (the same gap blocking receipt OCR and proof-of-payment screenshots), so all three will be solved together in V2. See the "Out of Scope for V1" section.
 
 ## API Routes
 

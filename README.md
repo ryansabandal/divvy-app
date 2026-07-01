@@ -10,7 +10,7 @@ A simple bill-splitting app for friend groups. See [CLAUDE.md](CLAUDE.md) for fu
 | Prisma schema                | ✅ Sessions, participants (+ payment method), expenses, splits, settlements |
 | Express API                  | ✅ All V1 routes built — see table below                  |
 | Settlement algorithm         | ✅ `backend/src/lib/settle.ts`, greedy debt simplification |
-| Frontend (Next.js)           | 🟡 Create-session, session view (add expense: EVEN/QUANTITY/CUSTOM, per-person breakdown, inline payment-method entry), and settle screen (finalize/recalculate/mark-as-paid, GCash/Maya links, bank transfer + copy) done; delete-expense UI & design pass pending |
+| Frontend (Next.js)           | ✅ All V1 features built — create-session, session view (add/delete expenses: EVEN/QUANTITY/CUSTOM, per-person breakdown, inline payment-method entry), settle screen (finalize/recalculate/mark-as-paid/copy-to-pay), shareable read-only link (`/view`), design pass (navy/teal/sky-blue/beige/white); deployment pending |
 | Railway deployment           | ⬜ Not started                                            |
 | Git / GitHub                 | ✅ Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private) |
 
@@ -84,15 +84,28 @@ Defined in `backend/prisma/schema.prisma`, mirrors the model in CLAUDE.md:
 - **ExpenseSplit** — per-participant share of one expense. `onDelete: Cascade` on its relation to `Expense`, so deleting an expense removes its splits automatically.
 - **Settlement** — a frozen, simplified payment between two participants, with a `paid` boolean. Empty until the plan is finalized: `GET .../settlements` computes a live preview from current expenses when no rows exist yet, but once `POST .../settlements` freezes the plan, that becomes the source of truth and `paid` flags persist across visits.
 
+### Request validation (`backend/src/schemas/sessions.ts`)
+
+Request bodies are validated with **Zod** before any Prisma call. Two schemas are defined:
+
+- `createSessionSchema` — validates `name` (non-empty string) and `participants` (array of non-empty strings, element-level check — the route previously only checked that the array was non-empty, so `["", null]` would reach Prisma).
+- `createExpenseSchema` — a Zod discriminated union on `split_type` (`EVEN` | `CUSTOM` | `QUANTITY`), each variant with its own required fields. Replaces the previous `(s: any)` inline casts that gave TypeScript no runtime safety. After `safeParse` succeeds, TypeScript narrows the body type based on `split_type` — no casts in the route body.
+
+DB-level checks (session existence, participant membership, split totals) remain in the route handlers since those require DB lookups that Zod can't do.
+
+### Error handling (`backend/src/index.ts`)
+
+A 4-argument Express error handler is registered after all routes. It logs the error server-side and returns `{"error": "..."}` JSON — a generic message in production (no stack-trace leak), the real message in development. Set `NODE_ENV=production` in Railway environment variables to activate the safe behaviour. Without this, Express 5's `finalhandler` would write the full stack trace into the response body.
+
 ### API routes (`backend/src/routes/sessions.ts`)
 
 | Route | Status | Notes |
 | --- | --- | --- |
-| `POST /api/sessions` | ✅ | Creates a `Session` and all initial `Participant` rows in one Prisma nested write |
+| `POST /api/sessions` | ✅ | Creates a `Session` and all initial `Participant` rows in one Prisma nested write; validated via `createSessionSchema` |
 | `GET /api/sessions/:sessionId` | ✅ | Returns the session with `participants` and `expenses` (with `payer` + `splits`) included |
 | `POST /api/sessions/:sessionId/participants` | ✅ | Adds one participant to an existing session; 404s if the session doesn't exist |
 | `PATCH /api/sessions/:sessionId/participants/:participantId` | ✅ | A participant sets their own `payment_method_type` + `payment_details` |
-| `POST /api/sessions/:sessionId/expenses` | ✅ | EVEN (even split across chosen participants) or CUSTOM (manual per-person amounts, must sum to `amount`) |
+| `POST /api/sessions/:sessionId/expenses` | ✅ | EVEN / CUSTOM / QUANTITY split; validated via `createExpenseSchema`. EVEN rounding: per-cent rounding is reconciled by pushing the ±1¢ remainder onto the first participant's share, same as QUANTITY — without this, 3-way splits of ₱100 produce ₱99.99 total and settlements never net to zero |
 | `DELETE /api/sessions/:sessionId/expenses/:expenseId` | ✅ | Removes an expense and its splits (cascade); scoped to the session so you can't delete another session's expense by id |
 | `GET /api/sessions/:sessionId/settlements` | ✅ | Returns the frozen plan (with `paid` flags) if one exists, else a live unsaved preview computed via `settle.ts`'s greedy matching; response includes names, not just ids |
 | `POST /api/sessions/:sessionId/settlements` | ✅ | Finalizes (freezes) the current preview into persisted `Settlement` rows, each starting `paid: false`. Calling it again — "Recalculate" in the UI — replaces the plan with a fresh one computed from current expenses, resetting any paid progress |
@@ -134,11 +147,13 @@ Scaffolded via `create-next-app` (TypeScript, Tailwind, App Router, no `src/` di
 ```
 frontend/
 ├── app/
-│   ├── layout.tsx      # root layout, metadata
-│   ├── page.tsx        # done: create-session form (name + dynamic participant list), POSTs to /api/sessions, redirects to /{sessionId}
-│   ├── [sessionId]/page.tsx          # done: session view — SWR fetch, expense list w/ per-person breakdown, add-expense form (3 modes, no delete yet), inline payment-method entry per participant, links to /settle
-│   └── [sessionId]/settle/page.tsx   # done: preview/finalize/recalculate + mark-as-paid + progress bar + GCash/Maya payment links + bank transfer copy button
-└── .env.local          # NEXT_PUBLIC_API_URL=http://localhost:4000 (NEXT_PUBLIC_ prefix required for any var read in browser-side code)
+│   ├── layout.tsx                        # root layout + sticky navy "Divvy" header (wraps all pages)
+│   ├── globals.css                       # Tailwind v4 @theme tokens + hand-written component classes (btn-primary, card, input, etc.)
+│   ├── page.tsx                          # create-session form (name + dynamic participant list), POSTs to /api/sessions, redirects to /{sessionId}
+│   ├── [sessionId]/page.tsx              # session view — add/delete expenses (3 split modes), inline payment-method entry, share + settle buttons
+│   ├── [sessionId]/settle/page.tsx       # settle screen — preview/finalize/recalculate, mark-as-paid, progress bar, copy-to-pay
+│   └── [sessionId]/view/page.tsx         # read-only participant view — expense breakdown + settlement plan, no edit controls
+└── .env.local                            # NEXT_PUBLIC_API_URL=http://localhost:4000 (NEXT_PUBLIC_ prefix required for any var read in browser-side code)
 ```
 
 **Data fetching:** uses **SWR** (`useSWR`) for client-side GET (not `useEffect`+`useState`) — chosen to satisfy the `react-hooks/set-state-in-effect` lint rule, which discourages fetch-in-effect. `mutate()` refetches after mutations. Form defaults are derived at render (no `setState` in an effect).
@@ -147,18 +162,21 @@ frontend/
 
 Backend needed one change to support this: `cors` middleware added in `backend/src/index.ts`, since the frontend (`localhost:3000`) and backend (`localhost:4000`) are different origins and browsers block cross-origin `fetch()` by default.
 
-**Payment-method entry** is inline on the session view: tapping a participant's row in "Who's splitting" expands a small form (GCash/Maya/Bank Transfer toggle + a detail input), `PATCH`ing `.../participants/:participantId` on save. No gating by "who you are" — consistent with the rest of the app, anyone with the link can set anyone's payment method.
+**Payment-method entry** is inline on the session view: tapping a participant's row in "Who's splitting" expands a small form. GCash and Maya show a single phone-number input. Bank Transfer shows two inputs (bank name + account number) which are combined on save into `"Bank Name - Account Number"` and stored in `payment_details`. On the settle screen, only the account number is copied to clipboard — the bank name is shown as the label (`BPI ·`) for context. `PATCH`es `.../participants/:participantId` on save. No identity gating — consistent with the rest of the app, anyone with the link can set anyone's payment method.
 
-**Payment links** on the settle screen (`app/[sessionId]/settle/page.tsx`) read each settlement row's creditor's payment method via a second `useSWR` call to `GET /api/sessions/:sessionId` (shares SWR's cache with the session page, so it's often instant). GCash/Maya render as a deep link button (`gcashLink`/`mayaLink` helpers, matching CLAUDE.md's `Payment Links` spec exactly); Bank Transfer has no deep link, so it's shown as plain text with a "Copy" button (Clipboard API) instead, since CLAUDE.md never specified an automatic equivalent for bank transfers. No payment method set yet → a muted "hasn't added a payment method yet" note.
+**Payment display** on the settle screen reads each settlement row's creditor's payment method via a second `useSWR` call to `GET /api/sessions/:sessionId` (shares the SWR cache, often instant). GCash, Maya, and Bank Transfer all follow the same pattern: a label, the copyable detail, and a "Copy" button (Clipboard API). There are no GCash/Maya deep links — neither app exposes a public URL that pre-fills a peer transfer, so a "Pay via GCash" button would be misleading. The V2 plan is QR Ph codes, which GCash, Maya, and most banks all support natively; see CLAUDE.md's "Out of Scope for V1" section.
+
+**Delete expense** — each expense card has a small `✕` button that confirms via `window.confirm`, fires `DELETE .../expenses/:expenseId`, and refetches. Errors surface in a red banner above the list.
+
+**Shareable read-only link** — `[sessionId]/view/page.tsx` fetches the same two endpoints as the session + settle pages but renders everything as read-only: expense breakdown, settlement plan with payment-copy buttons, and a progress bar if the plan is frozen. No forms, no delete buttons, no finalize/recalculate controls. The session page has a "Share view link" button that copies `<origin>/<sessionId>/view` to clipboard.
+
+**Design** — Tailwind v4, beige body background, sticky navy header with the "Divvy" wordmark. Component classes (`.btn-primary`, `.card`, `.input`, etc.) are defined in `globals.css` as plain CSS using `var(--color-*)` custom properties — not `@apply`. Reason: Next.js 15 with Turbopack does not run PostCSS plugins, so `@apply` is never processed and silently breaks the stylesheet. `@theme inline` (Tailwind v4 native) is used to define color tokens and generate utility classes; it works with Turbopack because it's part of Tailwind's native CSS engine, not a PostCSS step.
 
 ## Version control
 
-Single root-level `.gitignore` (covers `node_modules/`, `dist/`, `.env`/`.env.*`, `.DS_Store` — applies repo-wide, not per-folder, since `backend/` and `frontend/` are both Node/TS and share the same ignore rules). Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private). As of 2026-06-28, the entire settlement screen + payment links + payment-method entry UI (this README's most recent sections) are uncommitted, along with three new migrations — always run `git status` before resuming rather than trusting this note, since it goes stale fast.
+Single root-level `.gitignore` (covers `node_modules/`, `dist/`, `.env`/`.env.*`, `.DS_Store` — applies repo-wide, not per-folder, since `backend/` and `frontend/` are both Node/TS and share the same ignore rules). Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private). Always run `git status` before resuming rather than trusting any "uncommitted" notes in this file, since they go stale fast.
 
 ## Not yet built
 
-- Delete-expense UI in the session view (`DELETE .../expenses/:expenseId` backend route exists; no button yet — predates the settlement-screen work in this README's history, just noticed in passing)
-- Shareable read-only session link — right now there's only one view mode, and anyone with the link can edit anything (add expenses, set anyone's payment method, etc.); a true read-only mode for participants isn't built
-- Design pass: apply the modern/sleek palette (navy/teal/sky-blue/beige/white) across all screens — deferred until functional V1 is done (current styling is placeholder black/white/gray)
-- Railway deployment (Postgres + Express) and Vercel deployment (Next.js)
-- V2 (explicitly deferred, not in V1 scope): receipt photo OCR, QR code upload for payment methods, proof-of-payment screenshot upload — all need file storage infrastructure this stack doesn't have yet
+- Railway deployment (Postgres + Express) and Vercel deployment (Next.js) — the last remaining V1 item
+- V2 (explicitly deferred, not in V1 scope): QR Ph code upload for payment methods (the intended end-state for GCash/Maya/bank payments — payer scans instead of copying), receipt photo OCR, proof-of-payment screenshot upload — all three need file storage infrastructure this stack doesn't have yet; solve once for all rather than building upload infra piecemeal

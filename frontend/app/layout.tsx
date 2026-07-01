@@ -27,7 +27,13 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {/* Sticky branded header — stays visible as users scroll through long expense lists */}
+        <header className="sticky top-0 z-10 flex items-center bg-navy px-4 py-3 shadow-sm">
+          <span className="text-xl font-bold tracking-tight text-white">Divvy</span>
+        </header>
+        {children}
+      </body>
     </html>
   );
 }
