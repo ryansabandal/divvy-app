@@ -17,9 +17,11 @@ interface Settlement {
   paid?: boolean;
 }
 
-// The endpoint wraps the list with a flag for whether it's a frozen plan or a live preview
+// The endpoint wraps the list with a flag for whether it's a frozen plan or a live preview,
+// and a stale flag for when expenses changed after the plan was finalized
 interface SettlementsResponse {
   frozen: boolean;
+  stale: boolean;
   settlements: Settlement[];
 }
 
@@ -80,7 +82,7 @@ export default function SettlePage() {
     return <main className="flex-1 px-4 py-10 text-center text-navy/40">Loading…</main>;
   }
 
-  const { frozen, settlements } = data;
+  const { frozen, stale, settlements } = data;
   const participantsById = new Map((session?.participants ?? []).map((p) => [p.id, p]));
 
   // Render how the debtor should pay the creditor for one row, based on the creditor's saved method.
@@ -209,6 +211,13 @@ export default function SettlePage() {
                   {paidSettlements.length} of {settlements.length} paid · ₱{paidAmount.toFixed(2)} of ₱
                   {totalAmount.toFixed(2)}
                 </p>
+              </div>
+            )}
+
+            {/* Stale-plan warning: shown when expenses changed after the plan was finalized */}
+            {frozen && stale && (
+              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Expenses have changed since this plan was finalized — the amounts below may be out of date. Hit <strong>Recalculate</strong> to update.
               </div>
             )}
 

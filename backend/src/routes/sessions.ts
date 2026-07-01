@@ -29,6 +29,24 @@ function computeNetBalances(
   });
 }
 
+// Returns true if two settlement plans are equivalent — same payers, payees, and amounts.
+// Used to detect whether the frozen plan is stale after expenses are added or deleted.
+function settlementPlansMatch(
+  frozen: { from_id: string; to_id: string; amount: number }[],
+  live: { from_id: string; to_id: string; amount: number }[],
+): boolean {
+  if (frozen.length !== live.length) return false;
+  const key = (s: { from_id: string; to_id: string }) => `${s.from_id}:${s.to_id}`;
+  const sortedFrozen = [...frozen].sort((a, b) => key(a).localeCompare(key(b)));
+  const sortedLive   = [...live].sort((a, b) => key(a).localeCompare(key(b)));
+  return sortedFrozen.every(
+    (f, i) =>
+      f.from_id === sortedLive[i].from_id &&
+      f.to_id   === sortedLive[i].to_id &&
+      Math.abs(f.amount - sortedLive[i].amount) < 0.01,
+  );
+}
+
 // Shape a stored Settlement row (with debtor/creditor included) into the API response —
 // flat ids + names + paid flag, so GET-frozen, POST-freeze, and PATCH all return the same thing
 function serializeSettlement(s: {
@@ -303,7 +321,11 @@ sessionsRouter.get("/:sessionId/settlements", async (req, res) => {
     include: { debtor: true, creditor: true },
   });
   if (frozen.length > 0) {
-    return res.json({ frozen: true, settlements: frozen.map(serializeSettlement) });
+    // Also compute what the live plan looks like today so we can flag staleness if expenses changed
+    const balances = computeNetBalances(session.participants, session.expenses);
+    const livePlan = computeSettlements(balances);
+    const stale = !settlementPlansMatch(frozen, livePlan);
+    return res.json({ frozen: true, stale, settlements: frozen.map(serializeSettlement) });
   }
 
   // No frozen plan yet — compute a preview from current balances (not saved to the DB)
@@ -317,7 +339,7 @@ sessionsRouter.get("/:sessionId/settlements", async (req, res) => {
     amount: s.amount,
   }));
 
-  res.json({ frozen: false, settlements });
+  res.json({ frozen: false, stale: false, settlements });
 });
 
 // POST /api/sessions/:sessionId/settlements — freeze (lock in) the current plan so payments can

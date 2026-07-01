@@ -49,6 +49,7 @@ interface Settlement {
 
 interface SettlementsResponse {
   frozen: boolean;
+  stale: boolean;
   settlements: Settlement[];
 }
 
@@ -94,7 +95,7 @@ export default function ViewPage() {
     return <main className="flex-1 px-4 py-10 text-center text-navy/40">Loading…</main>;
   }
 
-  const { frozen, settlements } = settlementsData;
+  const { frozen, stale, settlements } = settlementsData;
   // Used to look up each creditor's payment method when rendering settlement rows
   const participantsById = new Map(session.participants.map((p) => [p.id, p]));
 
@@ -169,6 +170,13 @@ export default function ViewPage() {
                     {paidSettlements.length} of {settlements.length} paid · ₱{paidAmount.toFixed(2)} of ₱
                     {totalAmount.toFixed(2)}
                   </p>
+                </div>
+              )}
+
+              {/* Stale-plan warning: no Recalculate here — direct the participant to the organiser */}
+              {frozen && stale && (
+                <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  Expenses have changed since this plan was finalized — the amounts below may be out of date. Ask the session organiser to recalculate.
                 </div>
               )}
 
