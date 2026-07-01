@@ -1,0 +1,10 @@
+[build]
+# Install deps and compile TypeScript (prisma generate is baked into the build script)
+builder = "nixpacks"
+buildCommand = "npm ci && npm run build"
+
+[deploy]
+# Apply pending migrations then start the compiled server
+startCommand = "npm run prisma:deploy && npm start"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
