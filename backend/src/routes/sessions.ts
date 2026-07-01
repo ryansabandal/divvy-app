@@ -191,6 +191,13 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
     // Even share, rounded to the cent — matches how the group already splits bills by hand
     const share = Math.round((amount / participant_ids.length) * 100) / 100;
     splitRows = participant_ids.map((id) => ({ participant_id: id, amount_owed: share }));
+
+    // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
+    const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
+    const remainder = Math.round((amount - allocated) * 100) / 100;
+    if (remainder !== 0) {
+      splitRows[0].amount_owed = Math.round((splitRows[0].amount_owed + remainder) * 100) / 100;
+    }
   } else if (body.split_type === "CUSTOM") {
     const { splits } = body;
     if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {

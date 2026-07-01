@@ -395,7 +395,7 @@ export default function SessionPage() {
           )}
         </section>
 
-        {/* Add an expense (even split only for now) */}
+        {/* Add an expense */}
         <section className="mt-8 border-t border-gray-200 pt-6">
           <h2 className="text-sm font-medium mb-3">Add an expense</h2>
           <form onSubmit={handleAddExpense} className="flex flex-col gap-3">

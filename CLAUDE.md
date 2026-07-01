@@ -19,17 +19,18 @@ This file is the spec (what to build). See [README.md](README.md) for current bu
 ```
 divvy/
 ├── frontend/
-│   ├── app/
-│   │   ├── page.tsx                          # Create session
-│   │   ├── [sessionId]/page.tsx              # Session view
-│   │   └── [sessionId]/settle/page.tsx       # Settlement screen
-│   └── components/
+│   └── app/
+│       ├── page.tsx                          # Create session
+│       ├── [sessionId]/page.tsx              # Session view
+│       └── [sessionId]/settle/page.tsx       # Settlement screen
 ├── backend/
 │   ├── src/
 │   │   ├── index.ts                          # Express app entrypoint
 │   │   ├── db.ts                             # Shared PrismaClient instance
 │   │   ├── routes/
 │   │   │   └── sessions.ts                   # All /api/sessions/* routes — participants, expenses, and settlements are session-scoped, no independent top-level routes
+│   │   ├── schemas/
+│   │   │   └── sessions.ts                   # Zod schemas for request body validation
 │   │   └── lib/
 │   │       └── settle.ts                     # Debt simplification algorithm
 │   ├── prisma/
@@ -144,7 +145,7 @@ Use greedy debt simplification to minimize the number of transactions:
 3. Greedily match largest debtor to largest creditor
 4. Repeat until all balances are zero
 
-This is the standard approach used by Splitwise. Implement in `backend/lib/settle.ts`.
+This is the standard approach used by Splitwise. Implement in `backend/src/lib/settle.ts`.
 
 ## Payment Links
 

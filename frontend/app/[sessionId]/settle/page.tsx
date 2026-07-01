@@ -69,6 +69,8 @@ export default function SettlePage() {
 
   // Tracks which settlement row's bank details were just copied, to show "Copied!" briefly
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // Holds an error message from Finalize / Recalculate / Toggle-paid if the server returns non-2xx
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function handleCopy(text: string, key: string) {
     await navigator.clipboard.writeText(text);
@@ -143,7 +145,13 @@ export default function SettlePage() {
         "You can still add or remove expenses afterward — just hit Recalculate to update the plan, which resets any payments you've already checked off.",
     );
     if (!confirmed) return;
-    await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements`, { method: "POST" });
+    setActionError(null);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements`, { method: "POST" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setActionError(body.error ?? "Failed to finalize plan");
+      return;
+    }
     await mutate();
   }
 
@@ -153,17 +161,29 @@ export default function SettlePage() {
       "Recalculating replaces the current plan with one based on today's expenses, and resets every payment back to unpaid. Continue?",
     );
     if (!confirmed) return;
-    await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements`, { method: "POST" });
+    setActionError(null);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements`, { method: "POST" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setActionError(body.error ?? "Failed to recalculate plan");
+      return;
+    }
     await mutate();
   }
 
   // Flip one payment's paid state, then refetch so the progress bar and styling stay in sync
   async function handleTogglePaid(settlementId: string, currentlyPaid: boolean) {
-    await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements/${settlementId}`, {
+    setActionError(null);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements/${settlementId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paid: !currentlyPaid }),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setActionError(body.error ?? "Failed to update payment");
+      return;
+    }
     await mutate();
   }
 
@@ -238,6 +258,7 @@ export default function SettlePage() {
               ))}
             </ul>
 
+            {actionError && <p className="mt-4 text-sm text-red-600">{actionError}</p>}
             <button
               type="button"
               onClick={frozen ? handleRecalculate : handleFinalize}
