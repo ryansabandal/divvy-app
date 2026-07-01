@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../db";
 import { computeSettlements } from "../lib/settle";
+import { createSessionSchema, createExpenseSchema } from "../schemas/sessions";
 
 // Sub-router for everything mounted under /api/sessions in index.ts
 export const sessionsRouter = Router();
@@ -52,22 +53,19 @@ function serializeSettlement(s: {
 
 // POST /api/sessions — create a session and its initial participants together
 sessionsRouter.post("/", async (req, res) => {
-  const { name, participants } = req.body;
-
-  // Validate at the boundary: reject bad input before it reaches Prisma
-  if (typeof name !== "string" || name.trim() === "") {
-    return res.status(400).json({ error: "name is required" });
+  // Validate at the boundary: rejects bad shape (e.g. empty names, missing fields) before it reaches Prisma
+  const result = createSessionSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: result.error.issues[0].message });
   }
-  if (!Array.isArray(participants) || participants.length === 0) {
-    return res.status(400).json({ error: "participants must be a non-empty array of names" });
-  }
+  const { name, participants } = result.data;
 
   // Nested write: creates the Session row and all Participant rows in one transaction
   const session = await prisma.session.create({
     data: {
       name,
       participants: {
-        create: participants.map((participantName: string) => ({ name: participantName })),
+        create: participants.map((participantName) => ({ name: participantName })),
       },
     },
     include: { participants: { orderBy: { sort_order: "asc" } } },
@@ -153,23 +151,17 @@ sessionsRouter.patch("/:sessionId/participants/:participantId", async (req, res)
 });
 
 // POST /api/sessions/:sessionId/expenses — add an expense, split EVEN across chosen
-// participants or CUSTOM with manual per-participant amounts
+// participants, CUSTOM with manual per-participant amounts, or QUANTITY by units consumed
 sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
   const { sessionId } = req.params;
-  const { description, amount, paid_by, split_type, participant_ids, splits, quantity } = req.body;
 
-  if (typeof description !== "string" || description.trim() === "") {
-    return res.status(400).json({ error: "description is required" });
+  // Shape-level validation — structure and types only; DB-level checks (session, participant membership) follow after
+  const parseResult = createExpenseSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res.status(400).json({ error: parseResult.error.issues[0].message });
   }
-  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
-    return res.status(400).json({ error: "amount must be a positive number" });
-  }
-  if (typeof paid_by !== "string") {
-    return res.status(400).json({ error: "paid_by is required" });
-  }
-  if (split_type !== "EVEN" && split_type !== "CUSTOM" && split_type !== "QUANTITY") {
-    return res.status(400).json({ error: "split_type must be EVEN, CUSTOM, or QUANTITY" });
-  }
+  const body = parseResult.data;
+  const { description, amount, paid_by } = body;
 
   // Confirm the session exists, and pull its participants to validate every id against
   const session = await prisma.session.findUnique({
@@ -190,70 +182,47 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
   // Total units, stored on the expense only for a QUANTITY split (null otherwise)
   let expenseQuantity: number | null = null;
 
-  if (split_type === "EVEN") {
-    if (!Array.isArray(participant_ids) || participant_ids.length === 0) {
-      return res.status(400).json({ error: "participant_ids must be a non-empty array for an EVEN split" });
-    }
-    if (!participant_ids.every((id: string) => participantIdsInSession.has(id))) {
+  if (body.split_type === "EVEN") {
+    const { participant_ids } = body;
+    if (!participant_ids.every((id) => participantIdsInSession.has(id))) {
       return res.status(400).json({ error: "participant_ids must all belong to this session" });
     }
 
     // Even share, rounded to the cent — matches how the group already splits bills by hand
     const share = Math.round((amount / participant_ids.length) * 100) / 100;
-    splitRows = participant_ids.map((id: string) => ({ participant_id: id, amount_owed: share }));
-  } else if (split_type === "CUSTOM") {
-    if (!Array.isArray(splits) || splits.length === 0) {
-      return res.status(400).json({ error: "splits must be a non-empty array for a CUSTOM split" });
-    }
-    const validShape = splits.every(
-      (s: any) =>
-        typeof s.participant_id === "string" &&
-        participantIdsInSession.has(s.participant_id) &&
-        typeof s.amount_owed === "number" &&
-        s.amount_owed > 0
-    );
-    if (!validShape) {
+    splitRows = participant_ids.map((id) => ({ participant_id: id, amount_owed: share }));
+  } else if (body.split_type === "CUSTOM") {
+    const { splits } = body;
+    if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {
       return res.status(400).json({ error: "each split needs a valid participant_id and a positive amount_owed" });
     }
 
     // The splits must actually add up to what was paid, or settlements downstream would be wrong
-    const total = splits.reduce((sum: number, s: { amount_owed: number }) => sum + s.amount_owed, 0);
+    const total = splits.reduce((sum, s) => sum + s.amount_owed, 0);
     if (Math.abs(total - amount) > 0.01) {
       return res.status(400).json({ error: "splits must sum to the expense amount" });
     }
 
-    splitRows = splits.map((s: { participant_id: string; amount_owed: number }) => ({
+    splitRows = splits.map((s) => ({
       participant_id: s.participant_id,
       amount_owed: s.amount_owed,
     }));
   } else {
     // QUANTITY: each person consumed some whole number of identical units priced at amount / quantity
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      return res.status(400).json({ error: "quantity must be a positive whole number for a QUANTITY split" });
-    }
-    if (!Array.isArray(splits) || splits.length === 0) {
-      return res.status(400).json({ error: "splits must be a non-empty array for a QUANTITY split" });
-    }
-    const validShape = splits.every(
-      (s: any) =>
-        typeof s.participant_id === "string" &&
-        participantIdsInSession.has(s.participant_id) &&
-        Number.isInteger(s.units) &&
-        s.units > 0
-    );
-    if (!validShape) {
+    const { quantity, splits } = body;
+    if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {
       return res.status(400).json({ error: "each split needs a valid participant_id and a positive whole number of units" });
     }
 
     // The per-person units must add up to the total quantity ordered
-    const totalUnits = splits.reduce((sum: number, s: { units: number }) => sum + s.units, 0);
+    const totalUnits = splits.reduce((sum, s) => sum + s.units, 0);
     if (totalUnits !== quantity) {
       return res.status(400).json({ error: `units add up to ${totalUnits}, but quantity is ${quantity}` });
     }
 
     // Compute each person's share from the unit price, rounded to the cent
     const unitPrice = amount / quantity;
-    splitRows = splits.map((s: { participant_id: string; units: number }) => ({
+    splitRows = splits.map((s) => ({
       participant_id: s.participant_id,
       units: s.units,
       amount_owed: Math.round(s.units * unitPrice * 100) / 100,
@@ -276,7 +245,7 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
       paid_by,
       amount,
       description,
-      split_type,
+      split_type: body.split_type,
       quantity: expenseQuantity,
       splits: { create: splitRows },
     },
