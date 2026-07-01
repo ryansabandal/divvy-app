@@ -116,6 +116,8 @@ enum PaymentMethodType {
 
 ## V1 Features (Strict Scope)
 
+> **Status:** all V1 features below are built, deployed (Railway API + Postgres, Vercel frontend), and validated in production. V1 is **feature-complete** — not yet formally "closed": a short hardening pass (tests for `settle.ts`, API response-field hygiene, frontend deduplication) comes first. See [README.md](README.md#roadmap--next-steps) for the roadmap.
+
 - [x] Create a session (name the bill, add participants)
 - [x] Add expenses (who paid, how much, description)
 - [x] Even split or custom amounts per participant

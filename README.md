@@ -10,9 +10,12 @@ A simple bill-splitting app for friend groups. See [CLAUDE.md](CLAUDE.md) for fu
 | Prisma schema                | ✅ Sessions, participants (+ payment method), expenses, splits, settlements |
 | Express API                  | ✅ All V1 routes built — see table below                  |
 | Settlement algorithm         | ✅ `backend/src/lib/settle.ts`, greedy debt simplification |
-| Frontend (Next.js)           | ✅ All V1 features built — create-session, session view (add/delete expenses: EVEN/QUANTITY/CUSTOM, per-person breakdown, inline payment-method entry), settle screen (finalize/recalculate/mark-as-paid/copy-to-pay), shareable read-only link (`/view`), design pass (navy/teal/sky-blue/beige/white); deployment pending |
-| Railway deployment           | ⬜ Not started                                            |
+| Frontend (Next.js)           | ✅ All V1 features built — create-session, session view (add/delete expenses: EVEN/QUANTITY/CUSTOM, per-person breakdown, inline payment-method entry), settle screen (finalize/recalculate/mark-as-paid/copy-to-pay, stale-plan warning), shareable read-only link (`/view`), design pass (navy/teal/sky-blue/beige/white) |
+| Backend deployment           | ✅ Deployed on Railway (Express + PostgreSQL); URL lives in the Railway dashboard, not committed here |
+| Frontend deployment          | ✅ Deployed on Vercel; URL lives in the Vercel dashboard, not committed here |
 | Git / GitHub                 | ✅ Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private) |
+
+> **Status:** V1 is **feature-complete and deployed**. Not yet marked "closed" — a short hardening pass (see [Roadmap](#roadmap--next-steps)) comes first.
 
 ## High-level flow
 
@@ -107,7 +110,7 @@ A 4-argument Express error handler is registered after all routes. It logs the e
 | `PATCH /api/sessions/:sessionId/participants/:participantId` | ✅ | A participant sets their own `payment_method_type` + `payment_details` |
 | `POST /api/sessions/:sessionId/expenses` | ✅ | EVEN / CUSTOM / QUANTITY split; validated via `createExpenseSchema`. EVEN rounding: per-cent rounding is reconciled by pushing the ±1¢ remainder onto the first participant's share, same as QUANTITY — without this, 3-way splits of ₱100 produce ₱99.99 total and settlements never net to zero |
 | `DELETE /api/sessions/:sessionId/expenses/:expenseId` | ✅ | Removes an expense and its splits (cascade); scoped to the session so you can't delete another session's expense by id |
-| `GET /api/sessions/:sessionId/settlements` | ✅ | Returns the frozen plan (with `paid` flags) if one exists, else a live unsaved preview computed via `settle.ts`'s greedy matching; response includes names, not just ids |
+| `GET /api/sessions/:sessionId/settlements` | ✅ | Returns the frozen plan (with `paid` flags) if one exists, else a live unsaved preview computed via `settle.ts`'s greedy matching; response includes names, not just ids. Also returns a `stale` boolean — for a frozen plan, it recomputes the live plan and flags a mismatch so the UI can warn that expenses changed after finalizing |
 | `POST /api/sessions/:sessionId/settlements` | ✅ | Finalizes (freezes) the current preview into persisted `Settlement` rows, each starting `paid: false`. Calling it again — "Recalculate" in the UI — replaces the plan with a fresh one computed from current expenses, resetting any paid progress |
 | `PATCH /api/sessions/:sessionId/settlements/:settlementId` | ✅ | Toggles one frozen payment's `paid` flag; 404s if the settlement isn't part of this session |
 
@@ -124,6 +127,8 @@ A pure function, deliberately kept free of Prisma/database calls: `computeSettle
 The settlement plan starts as a **live preview** — recomputed on every `GET` from current expenses, never persisted. Hitting "Finalize" (`POST .../settlements`) freezes that preview into real `Settlement` rows so individual payments can be checked off (`PATCH`) as people actually pay each other back; this is what makes the progress bar on the settle screen meaningful instead of just a snapshot of the math.
 
 Expenses stay editable at all times, even after finalizing — there's no lock. If something changes after the plan is frozen, "Recalculate" (the same `POST .../settlements` endpoint) replaces the frozen rows with a fresh plan, which resets every payment back to unpaid. We deliberately rejected a harder design (a `Session.finalized` flag that would block adding/deleting expenses until "unfinalized"): in a no-login, shared-link app, a session-wide lock toggled by one participant — that also wipes everyone else's paid progress as a side effect of fixing one missed expense — was worse UX than just trusting people to recalculate when needed.
+
+**Stale-plan warning:** because expenses can change after finalizing, a frozen plan can silently drift from reality. `GET .../settlements` detects this by recomputing the live plan and comparing it to the frozen rows (the `settlementPlansMatch` helper in `sessions.ts`, matching on payer/payee/amount). When they differ, the response's `stale` flag is `true`, and both the settle screen and the read-only view show an amber banner — the settle screen prompts "Recalculate", the read-only view tells the participant to ask the organiser. This replaces the earlier failure mode where an out-of-date total (e.g. a plan finalized before the last expense was added) showed with no indication it was stale.
 
 ### Inspecting the database directly
 
@@ -160,7 +165,7 @@ frontend/
 
 **Add-expense form** has three split modes, all posting to `POST .../expenses`: **Evenly** (`EVEN`, participant checkboxes), **Quantity** (`QUANTITY`, total quantity → per-person units, backend computes amounts, "units remaining" guard), **Amount** (`CUSTOM`, per-person pesos, "remaining to split" guard). Amount/units inputs are `type="text"` (no number spinners) and clamp so totals can't exceed the expense.
 
-Backend needed one change to support this: `cors` middleware added in `backend/src/index.ts`, since the frontend (`localhost:3000`) and backend (`localhost:4000`) are different origins and browsers block cross-origin `fetch()` by default.
+Backend needed one change to support this: `cors` middleware added in `backend/src/index.ts`, since the frontend (`localhost:3000`) and backend (`localhost:4000`) are different origins and browsers block cross-origin `fetch()` by default. The middleware is restricted to an explicit origin allow-list (localhost for dev + the Vercel production origin) rather than a wildcard, so only the known frontends can call the API.
 
 **Payment-method entry** is inline on the session view: tapping a participant's row in "Who's splitting" expands a small form. GCash and Maya show a single phone-number input. Bank Transfer shows two inputs (bank name + account number) which are combined on save into `"Bank Name - Account Number"` and stored in `payment_details`. On the settle screen, only the account number is copied to clipboard — the bank name is shown as the label (`BPI ·`) for context. `PATCH`es `.../participants/:participantId` on save. No identity gating — consistent with the rest of the app, anyone with the link can set anyone's payment method.
 
@@ -176,7 +181,24 @@ Backend needed one change to support this: `cors` middleware added in `backend/s
 
 Single root-level `.gitignore` (covers `node_modules/`, `dist/`, `.env`/`.env.*`, `.DS_Store` — applies repo-wide, not per-folder, since `backend/` and `frontend/` are both Node/TS and share the same ignore rules). Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private). Always run `git status` before resuming rather than trusting any "uncommitted" notes in this file, since they go stale fast.
 
-## Not yet built
+## Roadmap / next steps
 
-- Railway deployment (Postgres + Express) and Vercel deployment (Next.js) — the last remaining V1 item
-- V2 (explicitly deferred, not in V1 scope): QR Ph code upload for payment methods (the intended end-state for GCash/Maya/bank payments — payer scans instead of copying), receipt photo OCR, proof-of-payment screenshot upload — all three need file storage infrastructure this stack doesn't have yet; solve once for all rather than building upload infra piecemeal
+V1 is feature-complete and deployed. Before marking it "closed," a short **hardening pass** comes next, then V2.
+
+### Hardening (next priority)
+
+- **Unit tests for `settle.ts`** — the settlement algorithm is deliberately pure/I/O-free so it can be tested in isolation, but currently has zero tests. This is the highest-value item: it's the one piece of real business logic, and it's already shaped for testing. Add a test runner (e.g. `vitest`) and cover the balance→plan cases, including the rounding-remainder edge cases.
+- **API response leaks** — `GET /api/sessions/:sessionId` returns full Prisma `Participant` rows, so internal fields (`sort_order`, `created_at`) are serialized into the JSON the browser receives. Add explicit `select` clauses (or a serializer) so responses only expose intended fields.
+- **Frontend duplication** — the SWR `fetcher` is copy-pasted identically across `page.tsx`, `settle/page.tsx`, and `view/page.tsx`, and `process.env.NEXT_PUBLIC_API_URL` is hand-concatenated in ~12 places. Extract a shared `fetcher` and an API-base helper (e.g. `apiUrl(path)`) so the base URL and fetch behaviour live in one place.
+
+### V2 (explicitly deferred, not in V1 scope)
+
+All three need file-storage infrastructure this stack doesn't have yet — solve that once for all rather than building upload infra piecemeal:
+
+- **QR Ph code upload** for payment methods — the intended end-state for GCash/Maya/bank payments (payer scans instead of copying a number)
+- **Receipt photo OCR** — auto-parse an itemised bill instead of manual entry
+- **Proof-of-payment screenshot upload** — let participants validate a payment was made
+
+### Considered but intentionally not scheduled
+
+- **Money as integer centavos** — amounts are stored as `Float`, so rounding logic is scattered. Switching to integer centavos (or `Decimal`) would remove a class of rounding bugs, but the current per-cent-remainder reconciliation is working, so this is noted, not planned.
