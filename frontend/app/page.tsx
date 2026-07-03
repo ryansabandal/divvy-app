@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { getRecentSessions, saveRecentSession, type RecentSession } from "@/lib/recentSessions";
 
 // Create a session: name the bill, list who's splitting it, then go straight to that session
 export default function CreateSessionPage() {
@@ -10,6 +12,14 @@ export default function CreateSessionPage() {
   const [participants, setParticipants] = useState(["", ""]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Sessions remembered on this device, for the "Your recent sessions" list below.
+  // Read in an effect (not during render) — localStorage doesn't exist on the server, so reading
+  // it during render would return different content client vs. server and cause a hydration mismatch.
+  const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
+  useEffect(() => {
+    setRecentSessions(getRecentSessions());
+  }, []);
 
   // Replace one participant name in place, leaving the rest of the array untouched
   function updateParticipant(index: number, value: string) {
@@ -54,12 +64,34 @@ export default function CreateSessionPage() {
     }
 
     const session = await res.json();
+    // Remember this session on this device so it can show up in "Your recent sessions" later.
+    saveRecentSession(session.id, session.name);
     router.push(`/${session.id}`);
   }
 
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-10">
       <div className="w-full max-w-sm">
+        {/* Only shown once there's history on this device — first-time visitors just see the form */}
+        {recentSessions.length > 0 && (
+          <section className="mb-8">
+            <h2 className="section-label">Your recent sessions</h2>
+            <ul className="flex flex-col gap-2">
+              {recentSessions.map((s) => (
+                <li key={s.id}>
+                  <Link
+                    href={`/${s.id}`}
+                    className="card flex w-full items-center justify-between px-4 py-3 text-left text-sm"
+                  >
+                    <span className="font-medium text-navy">{s.name}</span>
+                    <span className="text-xs text-navy/40">Open →</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <h1 className="text-2xl font-bold text-navy mb-1">New session</h1>
         <p className="text-sm text-navy/50 mb-8">Name the bill and add everyone splitting it.</p>
 

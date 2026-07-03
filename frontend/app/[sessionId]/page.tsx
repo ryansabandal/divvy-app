@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
+import { saveRecentSession } from "@/lib/recentSessions";
 
 // Shape of the data returned by GET /api/sessions/:sessionId
 interface Participant {
@@ -59,6 +60,12 @@ export default function SessionPage() {
     fetcher,
   );
 
+  // Once the session loads, remember it on this device — covers both "just created it"
+  // and "opened a shared link", so either way it shows up in "Your recent sessions".
+  useEffect(() => {
+    if (session) saveRecentSession(session.id, session.name);
+  }, [session?.id, session?.name]);
+
   // Add-expense form state
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -75,6 +82,8 @@ export default function SessionPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // Tracks whether the share-link copy button just fired, to show "Copied!" briefly
   const [copiedShareLink, setCopiedShareLink] = useState(false);
+  // Same, for the "copy session link" button (this session's own edit URL, so it can be reopened later)
+  const [copiedSessionLink, setCopiedSessionLink] = useState(false);
 
   // Payment-method form state: which participant's inline form is open, and its fields
   const [expandedParticipantId, setExpandedParticipantId] = useState<string | null>(null);
@@ -333,6 +342,10 @@ export default function SessionPage() {
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
+        {/* Back to the home page, e.g. to start or return to a different session */}
+        <Link href="/" className="mb-4 inline-block text-sm font-medium text-teal">
+          ← Home
+        </Link>
         <h1 className="text-2xl font-bold text-navy mb-1">{session.name}</h1>
         <p className="text-sm text-navy/50 mb-8">{session.participants.length} people</p>
 
@@ -610,6 +623,19 @@ export default function SessionPage() {
           </form>
         </section>
 
+        {/* Copy this session's own (editable) URL, so it can be pasted somewhere and reopened later */}
+        <button
+          type="button"
+          onClick={async () => {
+            await navigator.clipboard.writeText(`${window.location.origin}/${sessionId}`);
+            setCopiedSessionLink(true);
+            setTimeout(() => setCopiedSessionLink(false), 2000);
+          }}
+          className="btn-secondary mt-6"
+        >
+          {copiedSessionLink ? "Link copied!" : "Copy session link"}
+        </button>
+
         {/* Share a read-only link with participants so they can see what they owe */}
         <button
           type="button"
@@ -618,7 +644,7 @@ export default function SessionPage() {
             setCopiedShareLink(true);
             setTimeout(() => setCopiedShareLink(false), 2000);
           }}
-          className="btn-secondary mt-6"
+          className="btn-secondary mt-3"
         >
           {copiedShareLink ? "Link copied!" : "Share view link"}
         </button>
