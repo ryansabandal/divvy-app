@@ -19,11 +19,13 @@ This file is the spec (what to build). See [README.md](README.md) for current bu
 ```
 divvy/
 ├── frontend/
-│   └── app/
-│       ├── page.tsx                          # Create session
-│       ├── [sessionId]/page.tsx              # Session view (edit)
-│       ├── [sessionId]/settle/page.tsx       # Settlement screen
-│       └── [sessionId]/view/page.tsx         # Read-only participant view
+│   ├── app/
+│   │   ├── page.tsx                          # Create session + "Your recent sessions" list
+│   │   ├── [sessionId]/page.tsx              # Session view (edit)
+│   │   ├── [sessionId]/settle/page.tsx       # Settlement screen
+│   │   └── [sessionId]/view/page.tsx         # Read-only participant view
+│   └── lib/
+│       └── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
 ├── backend/
 │   ├── src/
 │   │   ├── index.ts                          # Express app entrypoint
@@ -128,6 +130,7 @@ enum PaymentMethodType {
 - [x] Settlement screen — who owes who (minimized transactions), with mark-as-paid tracking against a finalized plan
 - [x] Display each participant's GCash/Maya number or bank account on the settle screen with a copy button so the payer can initiate the transfer themselves inside the relevant app
 - [x] Shareable read-only session link (`/[sessionId]/view`) — expense breakdown + settlement plan, no edit controls; "Share view link" button on the session page copies the URL to clipboard
+- [x] Return to a past session without login — home page shows a device-local "Your recent sessions" list (`frontend/lib/recentSessions.ts`, backed by `localStorage`, newest-first, capped at 10); "Copy session link" button on the session page for cross-device return (chosen over a raw sessionId copy/paste flow — a 36-char UUID is error-prone to hand-copy and the app already has a better container for it: the URL)
 - [x] Design pass — navy/teal/sky-blue/beige/white palette; sticky navy header with Divvy wordmark; Tailwind v4 with plain CSS component classes (no `@apply` — Turbopack bypasses PostCSS, so `@apply` is never processed)
 
 ## Out of Scope for V1
@@ -140,6 +143,7 @@ enum PaymentMethodType {
 - Receipt photo upload + auto-parsing (OCR) — deferred to V2
 - QR Ph code upload for payment methods — the intended V2 end-state; GCash, Maya, and most bank apps can scan QR Ph so the payer just scans instead of copying a number. Deferred alongside OCR; both need file storage infrastructure this stack doesn't have yet, so solve that once for both
 - Proof-of-payment screenshot upload (for other participants to validate a payment) — deferred to V2 alongside OCR/QR upload, same missing file storage infrastructure
+- Settlement status indicator (checkmark/"Done" on a session in the recent-sessions list once its plan is finalized and fully paid) — idea only, not scheduled; the `Settlement.paid` data already exists, but the recent-sessions list is device-local (`localStorage`), so this needs a batch status endpoint rather than one request per listed session
 
 ## Settlement Algorithm
 
@@ -191,14 +195,7 @@ All routes live in `backend/src/routes/sessions.ts` (see the Project Structure s
 | Railway | Express + PostgreSQL | Free tier |
 | GitHub  | Source control       | Free      |
 
-## Build Order
-
-1. Prisma schema + Railway PostgreSQL setup
-2. Express API — sessions, participants, expenses
-3. Settlement algorithm (`settle.ts`)
-4. Next.js frontend — session creation + expense entry
-5. Settlement screen + payment links
-6. Deploy to Vercel + Railway
+**Gotcha:** `NEXT_PUBLIC_API_URL` (set in Vercel's project environment variables) must include the `https://` scheme. Without it, the browser resolves the value as a relative path off the frontend's own origin instead of an absolute URL to the Railway backend — requests 404 against Vercel itself, and the frontend's `JSON.parse` of that 404 HTML page throws `SyntaxError: unexpected character at line 1 column 1`.
 
 ## Design Principles
 
