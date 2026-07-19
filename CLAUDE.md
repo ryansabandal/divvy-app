@@ -125,7 +125,7 @@ enum PaymentMethodType {
 
 > **Status:** V1 is **feature-complete, deployed, and formally closed** (hardening pass completed 2026-07-19 — a full-repo audit plus every fix it produced). See [README.md](README.md#roadmap--next-steps) for exactly what changed.
 >
-> **Next up:** no single blocking item. Either groom the backlog filed at `.scratch/v1-hardening-audit/issues/` (13 lower-priority items from the audit — DRY/typing/a11y cleanups, rate limiting, etc.), or start V2 planning (QR Ph upload, receipt OCR, proof-of-payment — all gated on adding file-storage infra).
+> **Next up:** no single blocking item. Either groom the backlog filed at `.scratch/v1-hardening-audit/issues/` (19 lower-priority items — DRY/typing/a11y cleanups, rate limiting, etc.; tickets 14/15 are separate, already resolved), or start V2 planning (QR Ph upload, receipt OCR, proof-of-payment — all gated on adding file-storage infra).
 >
 > **Post-close addition (2026-07-19):** edit-in-place and drag-and-drop reorder for expenses — see below. Neither needs file-storage infra, so unlike the V2 trio they weren't held for that gate; added as a direct quality improvement on an existing V1 feature instead.
 
