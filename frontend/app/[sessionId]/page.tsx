@@ -1,9 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  sortableKeyboardCoordinates,
+  arrayMove,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { saveRecentSession } from "@/lib/recentSessions";
 import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
 import { apiUrl } from "@/lib/apiUrl";
@@ -42,6 +59,89 @@ interface Session {
   expenses: Expense[];
 }
 
+// One draggable expense card. Pulled out as its own component (rather than inlined in a .map())
+// because useSortable must be called once per item, and hooks can't be called inside a callback.
+function SortableExpenseCard({
+  expense,
+  onEdit,
+  onDelete,
+  isDeleting,
+}: {
+  expense: Expense;
+  onEdit: (expense: Expense) => void;
+  onDelete: (expenseId: string) => void;
+  isDeleting: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+    id: expense.id,
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <li ref={setNodeRef} style={style} className={`card-navy p-4 ${isDragging ? "opacity-50" : ""}`}>
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          {/* Drag handle: only this icon starts a drag, so tapping the card or the edit/delete
+              buttons next to it is never mistaken for the start of a reorder */}
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            aria-label="Reorder expense"
+            className="cursor-grab touch-none px-1 text-white/30 active:cursor-grabbing"
+          >
+            ⠿
+          </button>
+          <span className="font-semibold text-white">{expense.description}</span>
+        </div>
+        <div className="ml-2 flex shrink-0 items-center gap-2">
+          <span className="font-semibold text-white">₱{expense.amount.toFixed(2)}</span>
+          {/* Edit button: loads this expense into the form below, pre-filled */}
+          <button
+            type="button"
+            onClick={() => onEdit(expense)}
+            aria-label="Edit expense"
+            className="px-1 text-white/40 transition-colors hover:text-teal"
+          >
+            ✎
+          </button>
+          {/* Delete button: small tap target, grays out while the request is in flight */}
+          <button
+            type="button"
+            onClick={() => onDelete(expense.id)}
+            disabled={isDeleting}
+            aria-label="Delete expense"
+            className="px-1 text-white/40 transition-colors hover:text-red-400 disabled:opacity-40"
+          >
+            {isDeleting ? "…" : "✕"}
+          </button>
+        </div>
+      </div>
+      <p className="mt-1 text-sm text-white/60">
+        Paid by {expense.payer.name} ·{" "}
+        {expense.split_type === "EVEN"
+          ? "split evenly"
+          : expense.split_type === "QUANTITY" && expense.quantity
+            ? `${expense.quantity} units · ₱${(expense.amount / expense.quantity).toFixed(2)} each`
+            : "custom split"}
+      </p>
+      {/* Per-person breakdown of who owes what for this one expense */}
+      <ul className="mt-2 flex flex-col gap-0.5 text-xs text-white/50">
+        {expense.splits.map((s) => (
+          <li key={s.id} className="flex justify-between">
+            <span>
+              {s.participant.name}
+              {s.units != null ? ` ×${s.units}` : ""}
+            </span>
+            <span>₱{s.amount_owed.toFixed(2)}</span>
+          </li>
+        ))}
+      </ul>
+    </li>
+  );
+}
+
 // Session view: show the bill, who's in it, every expense, and a form to add more
 export default function SessionPage() {
   // useParams reads the [sessionId] segment from the URL (returned directly in a client component)
@@ -74,6 +174,17 @@ export default function SessionPage() {
   // Which expense is currently being deleted (shows a spinner in that row), and any delete error
   const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Non-null while the form below is editing an existing expense rather than adding a new one
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  // So tapping "Edit" can scroll the (always-rendered) form into view on mobile
+  const addExpenseSectionRef = useRef<HTMLElement>(null);
+  // Set if a drag-reorder's PATCH fails after the optimistic UI update already applied
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  // Pointer (mouse/touch, via the drag handle) + keyboard (arrow keys, for accessibility)
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   // Tracks whether the share-link copy button just fired, to show "Copied!" briefly
   const [copiedShareLink, setCopiedShareLink] = useState(false);
   // Same, for the "copy session link" button (this session's own edit URL, so it can be reopened later)
@@ -187,6 +298,73 @@ export default function SessionPage() {
     setDeletingExpenseId(null);
   }
 
+  // Reorders expenses on drag-end: shows the new order immediately (optimistic), PATCHes it to
+  // the backend, then reconciles — or reverts, via the plain mutate() below, if that PATCH fails
+  async function handleDragEnd(event: DragEndEvent) {
+    // TS doesn't carry the outer `if (!session) return` guard's narrowing into this nested
+    // function, since it could in principle run later — so it needs its own local guard
+    if (!session) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = session.expenses.findIndex((exp) => exp.id === active.id);
+    const newIndex = session.expenses.findIndex((exp) => exp.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(session.expenses, oldIndex, newIndex);
+    setReorderError(null);
+    await mutate({ ...session, expenses: reordered }, { revalidate: false });
+
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/expenses`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expense_ids: reordered.map((exp) => exp.id) }),
+    });
+
+    if (!res.ok) {
+      setReorderError("Failed to save the new order");
+    }
+    await mutate(); // reconciles with the server, or reverts the optimistic update on failure
+  }
+
+  // Shared by "cancel edit" and "after a successful add/save" — back to blank, add-mode defaults
+  function resetForm() {
+    setEditingExpenseId(null);
+    setFormError(null);
+    setDescription("");
+    setAmount("");
+    setPaidBy("");
+    setSplitWith(null);
+    setSplitType("EVEN");
+    setCustomAmounts({});
+    setQuantity("");
+    setCustomUnits({});
+  }
+
+  // Populate the (always-rendered) form from an existing expense, then scroll it into view —
+  // otherwise a tap on "Edit" up in the list leaves the form off-screen below the fold
+  function handleStartEdit(expense: Expense) {
+    setEditingExpenseId(expense.id);
+    setFormError(null);
+    setDescription(expense.description);
+    setAmount(String(expense.amount));
+    setPaidBy(expense.payer.id);
+    setSplitType(expense.split_type);
+    setSplitWith(expense.split_type === "EVEN" ? expense.splits.map((s) => s.participant_id) : null);
+    setCustomAmounts(
+      expense.split_type === "CUSTOM"
+        ? Object.fromEntries(expense.splits.map((s) => [s.participant_id, String(s.amount_owed)]))
+        : {},
+    );
+    setQuantity(expense.split_type === "QUANTITY" ? String(expense.quantity ?? "") : "");
+    setCustomUnits(
+      expense.split_type === "QUANTITY"
+        ? Object.fromEntries(expense.splits.map((s) => [s.participant_id, String(s.units ?? "")]))
+        : {},
+    );
+    addExpenseSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   // The expense total, how much is already allocated, and what's still left to split
   const expenseAmount = Number(amount) || 0;
   const customTotal = allParticipantIds.reduce((sum, id) => sum + (Number(customAmounts[id]) || 0), 0);
@@ -228,8 +406,9 @@ export default function SessionPage() {
     });
   }
 
-  // Validate the form, POST the expense, then mutate() so SWR refetches and shows it
-  async function handleAddExpense(e: React.SubmitEvent<HTMLFormElement>) {
+  // Validate the form, then POST a new expense or PATCH the one being edited; mutate() after
+  // so SWR refetches and the list reflects it
+  async function handleSubmitExpense(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
 
@@ -297,8 +476,12 @@ export default function SessionPage() {
     }
 
     setSubmitting(true);
-    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/expenses`), {
-      method: "POST",
+    // Editing an existing expense PATCHes it in place; otherwise POST creates a new one
+    const url = editingExpenseId
+      ? apiUrl(`/api/sessions/${sessionId}/expenses/${editingExpenseId}`)
+      : apiUrl(`/api/sessions/${sessionId}/expenses`);
+    const res = await fetch(url, {
+      method: editingExpenseId ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         description: description.trim(),
@@ -310,20 +493,13 @@ export default function SessionPage() {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      setFormError(body.error ?? "Failed to add expense");
+      setFormError(body.error ?? (editingExpenseId ? "Failed to save changes" : "Failed to add expense"));
       setSubmitting(false);
       return;
     }
 
-    // Reset the form back to defaults, then tell SWR to refetch so the new expense appears
-    setDescription("");
-    setAmount("");
-    setPaidBy("");
-    setSplitWith(null);
-    setSplitType("EVEN");
-    setCustomAmounts({});
-    setQuantity("");
-    setCustomUnits({});
+    // Back to blank, add-mode defaults, then tell SWR to refetch so the change appears
+    resetForm();
     await mutate();
     setSubmitting(false);
   }
@@ -427,58 +603,39 @@ export default function SessionPage() {
         <section>
           <h2 className="section-label">Expenses</h2>
           {deleteError && <p className="mb-2 text-sm text-red-500">{deleteError}</p>}
+          {reorderError && <p className="mb-2 text-sm text-red-500">{reorderError}</p>}
           {session.expenses.length === 0 ? (
             <p className="text-sm text-navy/40">No expenses yet.</p>
           ) : (
-            <ul className="flex flex-col gap-3">
-              {session.expenses.map((e) => (
-                <li key={e.id} className="card-navy p-4">
-                  <div className="flex items-start justify-between">
-                    <span className="font-semibold text-white">{e.description}</span>
-                    <div className="ml-2 flex shrink-0 items-center gap-2">
-                      <span className="font-semibold text-white">₱{e.amount.toFixed(2)}</span>
-                      {/* Delete button: small tap target, grays out while the request is in flight */}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteExpense(e.id)}
-                        disabled={deletingExpenseId === e.id}
-                        aria-label="Delete expense"
-                        className="px-1 text-white/40 transition-colors hover:text-red-400 disabled:opacity-40"
-                      >
-                        {deletingExpenseId === e.id ? "…" : "✕"}
-                      </button>
-                    </div>
-                  </div>
-                  <p className="mt-1 text-sm text-white/60">
-                    Paid by {e.payer.name} ·{" "}
-                    {e.split_type === "EVEN"
-                      ? "split evenly"
-                      : e.split_type === "QUANTITY" && e.quantity
-                        ? `${e.quantity} units · ₱${(e.amount / e.quantity).toFixed(2)} each`
-                        : "custom split"}
-                  </p>
-                  {/* Per-person breakdown of who owes what for this one expense */}
-                  <ul className="mt-2 flex flex-col gap-0.5 text-xs text-white/50">
-                    {e.splits.map((s) => (
-                      <li key={s.id} className="flex justify-between">
-                        <span>
-                          {s.participant.name}
-                          {s.units != null ? ` ×${s.units}` : ""}
-                        </span>
-                        <span>₱{s.amount_owed.toFixed(2)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              ))}
-            </ul>
+            <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={session.expenses.map((e) => e.id)} strategy={verticalListSortingStrategy}>
+                <ul className="flex flex-col gap-3">
+                  {session.expenses.map((e) => (
+                    <SortableExpenseCard
+                      key={e.id}
+                      expense={e}
+                      onEdit={handleStartEdit}
+                      onDelete={handleDeleteExpense}
+                      isDeleting={deletingExpenseId === e.id}
+                    />
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
           )}
         </section>
 
-        {/* Add an expense */}
-        <section className="mt-8 border-t border-navy/10 pt-6">
-          <h2 className="section-label">Add an expense</h2>
-          <form onSubmit={handleAddExpense} className="flex flex-col gap-3">
+        {/* Add or edit an expense — the same form serves both; editingExpenseId picks the mode */}
+        <section ref={addExpenseSectionRef} className="mt-8 border-t border-navy/10 pt-6">
+          <div className="flex items-center justify-between">
+            <h2 className="section-label">{editingExpenseId ? "Edit expense" : "Add an expense"}</h2>
+            {editingExpenseId && (
+              <button type="button" onClick={resetForm} className="text-sm font-medium text-navy/50">
+                Cancel
+              </button>
+            )}
+          </div>
+          <form onSubmit={handleSubmitExpense} className="flex flex-col gap-3">
             <input
               type="text"
               value={description}
@@ -607,7 +764,13 @@ export default function SessionPage() {
             {formError && <p className="text-sm text-red-500">{formError}</p>}
 
             <button type="submit" disabled={submitting} className="btn-primary">
-              {submitting ? "Adding…" : "Add expense"}
+              {editingExpenseId
+                ? submitting
+                  ? "Saving…"
+                  : "Save changes"
+                : submitting
+                  ? "Adding…"
+                  : "Add expense"}
             </button>
           </form>
         </section>

@@ -80,6 +80,7 @@ model Expense {
   description String
   split_type  SplitType
   quantity    Int?           // total units for a QUANTITY split (e.g. 6 shots); null otherwise
+  sort_order  Int            @default(autoincrement()) // keeps the expense list in a stable order and survives drag-and-drop reordering
   session     Session        @relation(fields: [session_id], references: [id])
   payer       Participant    @relation(fields: [paid_by], references: [id])
   splits      ExpenseSplit[]
@@ -124,11 +125,14 @@ enum PaymentMethodType {
 
 > **Status:** V1 is **feature-complete, deployed, and formally closed** (hardening pass completed 2026-07-19 — a full-repo audit plus every fix it produced). See [README.md](README.md#roadmap--next-steps) for exactly what changed.
 >
-> **Next up:** no single blocking item. Either groom the backlog filed at `.scratch/v1-hardening-audit/issues/` (12 lower-priority items from the audit — DRY/typing/a11y cleanups, rate limiting, etc.), or start V2 planning (QR Ph upload, receipt OCR, proof-of-payment — all gated on adding file-storage infra).
+> **Next up:** no single blocking item. Either groom the backlog filed at `.scratch/v1-hardening-audit/issues/` (13 lower-priority items from the audit — DRY/typing/a11y cleanups, rate limiting, etc.), or start V2 planning (QR Ph upload, receipt OCR, proof-of-payment — all gated on adding file-storage infra).
+>
+> **Post-close addition (2026-07-19):** edit-in-place and drag-and-drop reorder for expenses — see below. Neither needs file-storage infra, so unlike the V2 trio they weren't held for that gate; added as a direct quality improvement on an existing V1 feature instead.
 
 - [x] Create a session (name the bill, add participants)
 - [x] Add expenses (who paid, how much, description)
 - [x] Even split or custom amounts per participant
+- [x] Edit an expense in place (no more delete-and-recreate to fix a mistake) and drag-and-drop reorder the expense list
 - [x] Delete an expense (fix mistakes/duplicates)
 - [x] Participant self-enters their payment method via the shared link — GCash/Maya phone number, or bank name + account number entered as separate fields (stored combined as `"Bank Name - Account Number"`; only the account number is copied on the settle screen)
 - [x] Settlement screen — who owes who (minimized transactions), with mark-as-paid tracking against a finalized plan
@@ -185,6 +189,8 @@ GET    /api/sessions/:sessionId                              # Get session with 
 POST   /api/sessions/:sessionId/participants                 # Add participant
 PATCH  /api/sessions/:sessionId/participants/:participantId  # Set own payment method
 POST   /api/sessions/:sessionId/expenses                     # Add expense
+PATCH  /api/sessions/:sessionId/expenses/:expenseId          # Edit an expense in place (rebuilds its splits)
+PATCH  /api/sessions/:sessionId/expenses                     # Bulk reorder: reassign sort_order from a full ordered id list
 DELETE /api/sessions/:sessionId/expenses/:expenseId          # Delete an expense
 GET    /api/sessions/:sessionId/settlements                  # Get the settlement plan: frozen rows (with paid flags) if finalized, else a live preview
 POST   /api/sessions/:sessionId/settlements                  # Finalize (freeze) the plan; re-calling it later recomputes and resets paid flags

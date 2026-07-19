@@ -50,6 +50,9 @@ model Expense {
   split_type  SplitType
   // Total units for a QUANTITY split (e.g. 6 shots); null for EVEN/CUSTOM
   quantity    Int?
+  // Monotonic insert sequence, same pattern as Participant.sort_order: keeps the expense list in
+  // a stable order and lets users drag-reorder it, since insertion order alone isn't guaranteed
+  sort_order  Int            @default(autoincrement())
   session     Session        @relation(fields: [session_id], references: [id])
   payer       Participant    @relation(fields: [paid_by], references: [id])
   splits      ExpenseSplit[]

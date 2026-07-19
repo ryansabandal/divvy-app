@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { z } from "zod";
 import { prisma } from "../db";
 import { computeSettlements, RECONCILED_EPSILON } from "../lib/settle";
 import { createSessionSchema, createExpenseSchema } from "../schemas/sessions";
@@ -179,6 +180,7 @@ sessionsRouter.get("/:sessionId", async (req, res) => {
     include: {
       participants: { orderBy: { sort_order: "asc" } },
       expenses: {
+        orderBy: { sort_order: "asc" },
         include: {
           payer: true,
           splits: { include: { participant: true } },
@@ -251,6 +253,108 @@ sessionsRouter.patch("/:sessionId/participants/:participantId", async (req, res)
   res.json(serializeParticipant(updated));
 });
 
+// Result of buildExpenseSplits: either the rows are ready to persist, or a DB-level validation
+// failed (Zod already checked shape/types; this checks things only the session's participant
+// list can answer, e.g. whether an id actually belongs to this session)
+type SplitBuildResult =
+  | {
+      ok: true;
+      splitRows: { participant_id: string; amount_owed: number; units?: number }[];
+      expenseQuantity: number | null;
+    }
+  | { ok: false; error: string };
+
+// Builds the ExpenseSplit rows (and, for QUANTITY, the Expense.quantity value) for one of the
+// three split types. Shared by POST (create) and PATCH (edit) so this logic — duplicate-id
+// guards, rounding, and remainder distribution — has exactly one home instead of two copies.
+function buildExpenseSplits(
+  body: z.infer<typeof createExpenseSchema>,
+  participantIdsInSession: Set<string>,
+): SplitBuildResult {
+  const { amount } = body;
+
+  if (body.split_type === "EVEN") {
+    const { participant_ids } = body;
+    if (!participant_ids.every((id) => participantIdsInSession.has(id))) {
+      return { ok: false, error: "participant_ids must all belong to this session" };
+    }
+    // A repeated ID would double-charge that person and inflate the even-share denominator
+    if (new Set(participant_ids).size !== participant_ids.length) {
+      return { ok: false, error: "participant_ids must not contain duplicates" };
+    }
+
+    // Even share, rounded to the cent — matches how the group already splits bills by hand
+    const share = Math.round((amount / participant_ids.length) * 100) / 100;
+    const splitRows = participant_ids.map((id) => ({ participant_id: id, amount_owed: share }));
+
+    // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
+    const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
+    const remainder = Math.round((amount - allocated) * 100) / 100;
+    if (remainder !== 0) {
+      splitRows[0].amount_owed = Math.round((splitRows[0].amount_owed + remainder) * 100) / 100;
+    }
+
+    return { ok: true, splitRows, expenseQuantity: null };
+  }
+
+  if (body.split_type === "CUSTOM") {
+    const { splits } = body;
+    if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {
+      return { ok: false, error: "each split needs a valid participant_id and a positive amount_owed" };
+    }
+    // A repeated participant_id would create two split rows for the same person
+    const customIds = splits.map((s) => s.participant_id);
+    if (new Set(customIds).size !== customIds.length) {
+      return { ok: false, error: "splits must not contain duplicate participant_ids" };
+    }
+
+    // The splits must actually add up to what was paid, or settlements downstream would be wrong.
+    // Tightened to half a centavo (not a full cent) — these are hand-entered amounts, so a
+    // real mismatch should be rejected and fixed by the user rather than silently absorbed.
+    const total = splits.reduce((sum, s) => sum + s.amount_owed, 0);
+    if (Math.abs(total - amount) > RECONCILED_EPSILON) {
+      return { ok: false, error: "splits must sum to the expense amount" };
+    }
+
+    const splitRows = splits.map((s) => ({ participant_id: s.participant_id, amount_owed: s.amount_owed }));
+    return { ok: true, splitRows, expenseQuantity: null };
+  }
+
+  // QUANTITY: each person consumed some whole number of identical units priced at amount / quantity
+  const { quantity, splits } = body;
+  if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {
+    return { ok: false, error: "each split needs a valid participant_id and a positive whole number of units" };
+  }
+  // A repeated participant_id would create two split rows for the same person
+  const quantityIds = splits.map((s) => s.participant_id);
+  if (new Set(quantityIds).size !== quantityIds.length) {
+    return { ok: false, error: "splits must not contain duplicate participant_ids" };
+  }
+
+  // The per-person units must add up to the total quantity ordered
+  const totalUnits = splits.reduce((sum, s) => sum + s.units, 0);
+  if (totalUnits !== quantity) {
+    return { ok: false, error: `units add up to ${totalUnits}, but quantity is ${quantity}` };
+  }
+
+  // Compute each person's share from the unit price, rounded to the cent
+  const unitPrice = amount / quantity;
+  const splitRows = splits.map((s) => ({
+    participant_id: s.participant_id,
+    units: s.units,
+    amount_owed: Math.round(s.units * unitPrice * 100) / 100,
+  }));
+
+  // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
+  const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
+  const remainder = Math.round((amount - allocated) * 100) / 100;
+  if (remainder !== 0) {
+    splitRows[0].amount_owed = Math.round((splitRows[0].amount_owed + remainder) * 100) / 100;
+  }
+
+  return { ok: true, splitRows, expenseQuantity: quantity };
+}
+
 // POST /api/sessions/:sessionId/expenses — add an expense, split EVEN across chosen
 // participants, CUSTOM with manual per-participant amounts, or QUANTITY by units consumed
 sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
@@ -278,89 +382,11 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
     return res.status(400).json({ error: "paid_by must be a participant in this session" });
   }
 
-  // Build the ExpenseSplit rows up front so every branch feeds the same create() call below
-  let splitRows: { participant_id: string; amount_owed: number; units?: number }[];
-  // Total units, stored on the expense only for a QUANTITY split (null otherwise)
-  let expenseQuantity: number | null = null;
-
-  if (body.split_type === "EVEN") {
-    const { participant_ids } = body;
-    if (!participant_ids.every((id) => participantIdsInSession.has(id))) {
-      return res.status(400).json({ error: "participant_ids must all belong to this session" });
-    }
-    // A repeated ID would double-charge that person and inflate the even-share denominator
-    if (new Set(participant_ids).size !== participant_ids.length) {
-      return res.status(400).json({ error: "participant_ids must not contain duplicates" });
-    }
-
-    // Even share, rounded to the cent — matches how the group already splits bills by hand
-    const share = Math.round((amount / participant_ids.length) * 100) / 100;
-    splitRows = participant_ids.map((id) => ({ participant_id: id, amount_owed: share }));
-
-    // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
-    const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
-    const remainder = Math.round((amount - allocated) * 100) / 100;
-    if (remainder !== 0) {
-      splitRows[0].amount_owed = Math.round((splitRows[0].amount_owed + remainder) * 100) / 100;
-    }
-  } else if (body.split_type === "CUSTOM") {
-    const { splits } = body;
-    if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {
-      return res.status(400).json({ error: "each split needs a valid participant_id and a positive amount_owed" });
-    }
-    // A repeated participant_id would create two split rows for the same person
-    const customIds = splits.map((s) => s.participant_id);
-    if (new Set(customIds).size !== customIds.length) {
-      return res.status(400).json({ error: "splits must not contain duplicate participant_ids" });
-    }
-
-    // The splits must actually add up to what was paid, or settlements downstream would be wrong.
-    // Tightened to half a centavo (not a full cent) — these are hand-entered amounts, so a
-    // real mismatch should be rejected and fixed by the user rather than silently absorbed.
-    const total = splits.reduce((sum, s) => sum + s.amount_owed, 0);
-    if (Math.abs(total - amount) > RECONCILED_EPSILON) {
-      return res.status(400).json({ error: "splits must sum to the expense amount" });
-    }
-
-    splitRows = splits.map((s) => ({
-      participant_id: s.participant_id,
-      amount_owed: s.amount_owed,
-    }));
-  } else {
-    // QUANTITY: each person consumed some whole number of identical units priced at amount / quantity
-    const { quantity, splits } = body;
-    if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {
-      return res.status(400).json({ error: "each split needs a valid participant_id and a positive whole number of units" });
-    }
-    // A repeated participant_id would create two split rows for the same person
-    const quantityIds = splits.map((s) => s.participant_id);
-    if (new Set(quantityIds).size !== quantityIds.length) {
-      return res.status(400).json({ error: "splits must not contain duplicate participant_ids" });
-    }
-
-    // The per-person units must add up to the total quantity ordered
-    const totalUnits = splits.reduce((sum, s) => sum + s.units, 0);
-    if (totalUnits !== quantity) {
-      return res.status(400).json({ error: `units add up to ${totalUnits}, but quantity is ${quantity}` });
-    }
-
-    // Compute each person's share from the unit price, rounded to the cent
-    const unitPrice = amount / quantity;
-    splitRows = splits.map((s) => ({
-      participant_id: s.participant_id,
-      units: s.units,
-      amount_owed: Math.round(s.units * unitPrice * 100) / 100,
-    }));
-
-    // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
-    const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
-    const remainder = Math.round((amount - allocated) * 100) / 100;
-    if (remainder !== 0) {
-      splitRows[0].amount_owed = Math.round((splitRows[0].amount_owed + remainder) * 100) / 100;
-    }
-
-    expenseQuantity = quantity;
+  const splitResult = buildExpenseSplits(body, participantIdsInSession);
+  if (!splitResult.ok) {
+    return res.status(400).json({ error: splitResult.error });
   }
+  const { splitRows, expenseQuantity } = splitResult;
 
   // Nested write: creates the Expense and all its ExpenseSplit rows in one transaction
   const expense = await prisma.expense.create({
@@ -377,6 +403,111 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
   });
 
   res.status(201).json(serializeExpense(expense));
+});
+
+// PATCH /api/sessions/:sessionId/expenses/:expenseId — edit an expense in place (rebuilds its
+// splits from the new values), replacing the old delete-then-recreate-to-fix-a-mistake workflow
+sessionsRouter.patch("/:sessionId/expenses/:expenseId", async (req, res) => {
+  const { sessionId, expenseId } = req.params;
+
+  const parseResult = createExpenseSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res.status(400).json({ error: parseResult.error.issues[0].message });
+  }
+  const body = parseResult.data;
+  const { description, amount, paid_by } = body;
+
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: { participants: true },
+  });
+  if (!session) {
+    return res.status(404).json({ error: "session not found" });
+  }
+
+  // Scope to this session, same pattern as DELETE below
+  const existing = await prisma.expense.findFirst({ where: { id: expenseId, session_id: sessionId } });
+  if (!existing) {
+    return res.status(404).json({ error: "expense not found in this session" });
+  }
+
+  const participantIdsInSession = new Set(session.participants.map((p) => p.id));
+  if (!participantIdsInSession.has(paid_by)) {
+    return res.status(400).json({ error: "paid_by must be a participant in this session" });
+  }
+
+  const splitResult = buildExpenseSplits(body, participantIdsInSession);
+  if (!splitResult.ok) {
+    return res.status(400).json({ error: splitResult.error });
+  }
+  const { splitRows, expenseQuantity } = splitResult;
+
+  // Replace the splits atomically: wipe the old rows, update the expense with fresh ones nested
+  // in — same deleteMany + recreate shape the settlement "recalculate" flow already established
+  const [, updated] = await prisma.$transaction([
+    prisma.expenseSplit.deleteMany({ where: { expense_id: expenseId } }),
+    prisma.expense.update({
+      where: { id: expenseId },
+      data: {
+        amount,
+        description,
+        paid_by,
+        split_type: body.split_type,
+        quantity: expenseQuantity,
+        splits: { create: splitRows },
+      },
+      include: { payer: true, splits: { include: { participant: true } } },
+    }),
+  ]);
+
+  res.json(serializeExpense(updated));
+});
+
+// PATCH /api/sessions/:sessionId/expenses — bulk reorder: caller sends every expense id in this
+// session in its new order; sort_order is reassigned to match. Deliberately a collection-level
+// route (not nested under /:expenseId) so its path can never collide with the edit route above —
+// Express would otherwise match ":expenseId" against a literal segment like "order" or "reorder"
+// depending on registration order, a well-known footgun this shape sidesteps entirely.
+sessionsRouter.patch("/:sessionId/expenses", async (req, res) => {
+  const { sessionId } = req.params;
+  const { expense_ids } = req.body;
+
+  if (!Array.isArray(expense_ids) || !expense_ids.every((id) => typeof id === "string")) {
+    return res.status(400).json({ error: "expense_ids must be an array of strings" });
+  }
+
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: { expenses: true },
+  });
+  if (!session) {
+    return res.status(404).json({ error: "session not found" });
+  }
+
+  // Must cover every expense in the session exactly once — a partial or stale list would
+  // silently strand the missing expenses at whatever sort_order they already had
+  const currentIds = new Set(session.expenses.map((e) => e.id));
+  const providedIds = new Set(expense_ids);
+  const isCompleteReorder =
+    expense_ids.length === session.expenses.length &&
+    providedIds.size === expense_ids.length &&
+    expense_ids.every((id: string) => currentIds.has(id));
+  if (!isCompleteReorder) {
+    return res.status(400).json({ error: "expense_ids must include every expense in this session exactly once" });
+  }
+
+  await prisma.$transaction(
+    expense_ids.map((id: string, index: number) =>
+      prisma.expense.update({ where: { id }, data: { sort_order: index } }),
+    ),
+  );
+
+  const expenses = await prisma.expense.findMany({
+    where: { session_id: sessionId },
+    orderBy: { sort_order: "asc" },
+    include: { payer: true, splits: { include: { participant: true } } },
+  });
+  res.json(expenses.map(serializeExpense));
 });
 
 // DELETE /api/sessions/:sessionId/expenses/:expenseId — remove a mistaken or duplicate expense
