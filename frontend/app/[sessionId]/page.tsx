@@ -294,6 +294,8 @@ export default function SessionPage() {
       setDeletingExpenseId(null);
       return;
     }
+    // Otherwise the form would stay bound to a row that no longer exists
+    if (expenseId === editingExpenseId) resetForm();
     await mutate();
     setDeletingExpenseId(null);
   }

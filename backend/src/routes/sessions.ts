@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { computeSettlements, RECONCILED_EPSILON } from "../lib/settle";
 import { createSessionSchema, createExpenseSchema } from "../schemas/sessions";
@@ -444,21 +445,32 @@ sessionsRouter.patch("/:sessionId/expenses/:expenseId", async (req, res) => {
 
   // Replace the splits atomically: wipe the old rows, update the expense with fresh ones nested
   // in — same deleteMany + recreate shape the settlement "recalculate" flow already established
-  const [, updated] = await prisma.$transaction([
-    prisma.expenseSplit.deleteMany({ where: { expense_id: expenseId } }),
-    prisma.expense.update({
-      where: { id: expenseId },
-      data: {
-        amount,
-        description,
-        paid_by,
-        split_type: body.split_type,
-        quantity: expenseQuantity,
-        splits: { create: splitRows },
-      },
-      include: { payer: true, splits: { include: { participant: true } } },
-    }),
-  ]);
+  let updated;
+  try {
+    [, updated] = await prisma.$transaction([
+      prisma.expenseSplit.deleteMany({ where: { expense_id: expenseId } }),
+      prisma.expense.update({
+        where: { id: expenseId },
+        data: {
+          amount,
+          description,
+          paid_by,
+          split_type: body.split_type,
+          quantity: expenseQuantity,
+          splits: { create: splitRows },
+        },
+        include: { payer: true, splits: { include: { participant: true } } },
+      }),
+    ]);
+  } catch (err) {
+    // The expense can vanish between the existence check above and this transaction (e.g.
+    // another participant deleting it concurrently) — Prisma throws P2025 for an update
+    // targeting a row that's gone; treat that the same as the "not found" case above
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      return res.status(404).json({ error: "expense not found in this session" });
+    }
+    throw err;
+  }
 
   res.json(serializeExpense(updated));
 });
