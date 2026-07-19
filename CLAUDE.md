@@ -211,3 +211,17 @@ All routes live in `backend/src/routes/sessions.ts` (see the Project Structure s
 - **Local dev parity** — the local environment should mirror production as closely as possible; no "works on my machine" gaps
 - **Container runtime:** Podman (not Docker) — use `podman-compose` for compose workflows
 - **Comments:** Every non-trivial line or block gets a simple one-liner comment explaining what it does — code should be readable to someone seeing it for the first time
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five canonical roles, unchanged: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
