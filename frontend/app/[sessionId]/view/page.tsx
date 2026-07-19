@@ -6,6 +6,8 @@ import useSWR from "swr";
 import { parseBankDetails } from "@/lib/paymentDetails";
 import { apiUrl } from "@/lib/apiUrl";
 import { fetcher } from "@/lib/fetcher";
+import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
+import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
 
 // These interfaces mirror the shapes returned by the two API endpoints this page fetches
 interface Participant {
@@ -230,9 +232,20 @@ export default function ViewPage() {
                         })()
                       ) : (
                         <p className="text-xs text-navy/40">
-                          {s.to_name} hasn&apos;t added a payment method yet
+                          {/* Explicit {" "} — JSX strips the space after an expression when the
+                              text node wraps onto another line, rendering "Annhasn't" */}
+                          {s.to_name}{" "}hasn&apos;t added a payment method yet
                         </p>
                       )}
+
+                      {/* What the debtor is actually being charged for — this is the screen
+                          participants open from the shared link, so it's where verifying your
+                          own line items matters most */}
+                      <ExpenseBreakdown
+                        personName={s.from_name}
+                        breakdown={buildParticipantBreakdown(s.from_id, session.expenses)}
+                        rowAmount={s.amount}
+                      />
                     </li>
                   );
                 })}

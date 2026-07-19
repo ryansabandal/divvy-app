@@ -24,11 +24,14 @@ divvy/
 │   │   ├── [sessionId]/page.tsx              # Session view (edit)
 │   │   ├── [sessionId]/settle/page.tsx       # Settlement screen
 │   │   └── [sessionId]/view/page.tsx         # Read-only participant view
-│   └── lib/
-│       ├── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
-│       ├── paymentDetails.ts                 # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
-│       ├── apiUrl.ts                         # apiUrl(path) — builds an absolute backend URL from NEXT_PUBLIC_API_URL
-│       └── fetcher.ts                        # shared SWR fetcher (generic error message parameterized per page)
+│   ├── lib/
+│   │   ├── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
+│   │   ├── paymentDetails.ts                 # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
+│   │   ├── apiUrl.ts                         # apiUrl(path) — builds an absolute backend URL from NEXT_PUBLIC_API_URL
+│   │   ├── fetcher.ts                        # shared SWR fetcher (generic error message parameterized per page)
+│   │   └── expenseBreakdown.ts               # buildParticipantBreakdown() — what one person is charged for; pure, no React
+│   └── components/
+│       └── ExpenseBreakdown.tsx              # collapsible per-person charge list, shared by the settle + view pages
 ├── backend/
 │   ├── src/
 │   │   ├── index.ts                          # Express app entrypoint
@@ -136,6 +139,7 @@ enum PaymentMethodType {
 - [x] Delete an expense (fix mistakes/duplicates)
 - [x] Participant self-enters their payment method via the shared link — GCash/Maya phone number, or bank name + account number entered as separate fields (stored combined as `"Bank Name - Account Number"`; only the account number is copied on the settle screen)
 - [x] Settlement screen — who owes who (minimized transactions), with mark-as-paid tracking against a finalized plan
+- [x] Per-person charge breakdown on the settle + read-only view screens — expand a settlement row to see exactly which expenses the debtor is being charged for, so they can verify their own line items without scrolling the full expense list. Deliberately describes the **person**, not the payment: the plan is a simplified routing of net balances, so a given row often can't be traced to specific line items (the debtor and creditor may never have shared an expense)
 - [x] Display each participant's GCash/Maya number or bank account on the settle screen with a copy button so the payer can initiate the transfer themselves inside the relevant app
 - [x] Shareable read-only session link (`/[sessionId]/view`) — expense breakdown + settlement plan, no edit controls; "Share view link" button on the session page copies the URL to clipboard
 - [x] Return to a past session without login — home page shows a device-local "Your recent sessions" list (`frontend/lib/recentSessions.ts`, backed by `localStorage`, newest-first, capped at 10); "Copy session link" button on the session page for cross-device return (chosen over a raw sessionId copy/paste flow — a 36-char UUID is error-prone to hand-copy and the app already has a better container for it: the URL)

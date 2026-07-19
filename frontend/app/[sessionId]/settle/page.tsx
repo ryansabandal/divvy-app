@@ -7,6 +7,8 @@ import useSWR from "swr";
 import { parseBankDetails } from "@/lib/paymentDetails";
 import { apiUrl } from "@/lib/apiUrl";
 import { fetcher } from "@/lib/fetcher";
+import { buildParticipantBreakdown, type BreakdownExpense } from "@/lib/expenseBreakdown";
+import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
 
 // One payment in the settlement plan. id/paid are only present once the plan is frozen —
 // a live preview (computed fresh, not yet persisted) omits both.
@@ -28,7 +30,8 @@ interface SettlementsResponse {
   settlements: Settlement[];
 }
 
-// Just enough of GET /api/sessions/:sessionId to look up a creditor's payment method
+// Just enough of GET /api/sessions/:sessionId to look up a creditor's payment method and to
+// break down what each debtor is being charged for
 interface Participant {
   id: string;
   name: string;
@@ -38,6 +41,9 @@ interface Participant {
 
 interface Session {
   participants: Participant[];
+  // Typed via the breakdown module's own minimal shape rather than redeclaring the full Expense
+  // interface a fourth time across the app
+  expenses: BreakdownExpense[];
 }
 
 // Settlement screen: live preview until finalized, then a trackable plan with paid checkboxes
@@ -245,6 +251,16 @@ export default function SettlePage() {
 
                   {/* How the debtor should actually pay the creditor */}
                   {renderPaymentAction(s)}
+
+                  {/* What the debtor is actually being charged for, so they can verify their own
+                      line items without scrolling the whole expense list back on the session page */}
+                  {session && (
+                    <ExpenseBreakdown
+                      personName={s.from_name}
+                      breakdown={buildParticipantBreakdown(s.from_id, session.expenses)}
+                      rowAmount={s.amount}
+                    />
+                  )}
                 </li>
               ))}
             </ul>
