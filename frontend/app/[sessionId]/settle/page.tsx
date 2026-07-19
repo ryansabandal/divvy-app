@@ -4,6 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
+import { parseBankDetails } from "@/lib/paymentDetails";
+import { apiUrl } from "@/lib/apiUrl";
+import { fetcher } from "@/lib/fetcher";
 
 // One payment in the settlement plan. id/paid are only present once the plan is frozen —
 // a live preview (computed fresh, not yet persisted) omits both.
@@ -37,15 +40,6 @@ interface Session {
   participants: Participant[];
 }
 
-// SWR calls this with the URL key; returns parsed JSON or throws on a bad response
-const fetcher = (url: string) =>
-  fetch(url).then((res) => {
-    if (!res.ok) {
-      throw new Error(res.status === 404 ? "Session not found" : "Failed to load settlements");
-    }
-    return res.json();
-  });
-
 // Settlement screen: live preview until finalized, then a trackable plan with paid checkboxes
 export default function SettlePage() {
   // Read the [sessionId] segment straight off the URL (client component, so it's not a Promise here)
@@ -53,15 +47,15 @@ export default function SettlePage() {
 
   // SWR owns the fetch + cache + re-render; the key is null until sessionId is known so it won't fire early
   const { data, error, mutate } = useSWR<SettlementsResponse>(
-    sessionId ? `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements` : null,
-    fetcher,
+    sessionId ? apiUrl(`/api/sessions/${sessionId}/settlements`) : null,
+    (url: string) => fetcher(url, "Failed to load settlements"),
   );
 
   // Second, independent fetch for payment methods — shares SWR's cache with the session page,
   // so this is often instant if the user arrived via the "Settle up" link
   const { data: session } = useSWR<Session>(
-    sessionId ? `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}` : null,
-    fetcher,
+    sessionId ? apiUrl(`/api/sessions/${sessionId}`) : null,
+    (url: string) => fetcher(url, "Failed to load settlements"),
   );
 
   // Tracks which settlement row's bank details were just copied, to show "Copied!" briefly
@@ -100,10 +94,10 @@ export default function SettlePage() {
     let displayText: string;
     let copyText: string;
     if (creditor.payment_method_type === "BANK_TRANSFER") {
-      const separatorIndex = creditor.payment_details.indexOf(" - ");
-      methodLabel = separatorIndex !== -1 ? creditor.payment_details.slice(0, separatorIndex) : "Bank";
-      displayText = separatorIndex !== -1 ? creditor.payment_details.slice(separatorIndex + 3) : creditor.payment_details;
-      copyText = displayText;
+      const { bankName, accountNumber } = parseBankDetails(creditor.payment_details);
+      methodLabel = bankName || "Bank";
+      displayText = accountNumber;
+      copyText = accountNumber;
     } else {
       methodLabel = creditor.payment_method_type === "GCASH" ? "GCash" : "Maya";
       displayText = creditor.payment_details;
@@ -137,7 +131,7 @@ export default function SettlePage() {
     );
     if (!confirmed) return;
     setActionError(null);
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements`, { method: "POST" });
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/settlements`), { method: "POST" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       setActionError(body.error ?? "Failed to finalize plan");
@@ -153,7 +147,7 @@ export default function SettlePage() {
     );
     if (!confirmed) return;
     setActionError(null);
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements`, { method: "POST" });
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/settlements`), { method: "POST" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       setActionError(body.error ?? "Failed to recalculate plan");
@@ -165,7 +159,7 @@ export default function SettlePage() {
   // Flip one payment's paid state, then refetch so the progress bar and styling stay in sync
   async function handleTogglePaid(settlementId: string, currentlyPaid: boolean) {
     setActionError(null);
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements/${settlementId}`, {
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/settlements/${settlementId}`), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paid: !currentlyPaid }),

@@ -1,10 +1,23 @@
 import { Router } from "express";
 import { prisma } from "../db";
-import { computeSettlements } from "../lib/settle";
+import { computeSettlements, RECONCILED_EPSILON } from "../lib/settle";
 import { createSessionSchema, createExpenseSchema } from "../schemas/sessions";
 
 // Sub-router for everything mounted under /api/sessions in index.ts
 export const sessionsRouter = Router();
+
+// Matches an RFC 4122 UUID — session ids are always one of these, so anything else can never
+// match a row and would otherwise reach Postgres as a raw "invalid input syntax" error (500)
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Runs before any route below with a :sessionId segment — turns a malformed id into a clean
+// 404 up front instead of letting every handler hit the same Postgres error independently
+sessionsRouter.param("sessionId", (_req, res, next, sessionId) => {
+  if (!UUID_RE.test(sessionId)) {
+    return res.status(404).json({ error: "session not found" });
+  }
+  next();
+});
 
 // Net balance per participant: what they paid for, minus what they owe across all splits.
 // Positive = they're owed money, negative = they owe. Shared by the preview + freeze routes
@@ -69,6 +82,67 @@ function serializeSettlement(s: {
   };
 }
 
+// Shape a Participant row for the API response — drops sort_order (an internal list-ordering
+// mechanism) and created_at (never read by the frontend)
+function serializeParticipant(p: {
+  id: string;
+  name: string;
+  payment_method_type: string | null;
+  payment_details: string | null;
+}) {
+  return {
+    id: p.id,
+    name: p.name,
+    payment_method_type: p.payment_method_type,
+    payment_details: p.payment_details,
+  };
+}
+
+// Shape one ExpenseSplit row — drops expense_id (redundant, it's already nested under its expense)
+function serializeExpenseSplit(s: {
+  id: string;
+  participant_id: string;
+  amount_owed: number;
+  units: number | null;
+  participant: { id: string; name: string; payment_method_type: string | null; payment_details: string | null };
+}) {
+  return {
+    id: s.id,
+    participant_id: s.participant_id,
+    amount_owed: s.amount_owed,
+    units: s.units,
+    participant: serializeParticipant(s.participant),
+  };
+}
+
+// Shape an Expense row — drops session_id (redundant, nested under its session) and the raw
+// paid_by id (the serialized payer object below supersedes it)
+function serializeExpense(e: {
+  id: string;
+  amount: number;
+  description: string;
+  split_type: string;
+  quantity: number | null;
+  payer: { id: string; name: string; payment_method_type: string | null; payment_details: string | null };
+  splits: {
+    id: string;
+    participant_id: string;
+    amount_owed: number;
+    units: number | null;
+    participant: { id: string; name: string; payment_method_type: string | null; payment_details: string | null };
+  }[];
+}) {
+  return {
+    id: e.id,
+    amount: e.amount,
+    description: e.description,
+    split_type: e.split_type,
+    quantity: e.quantity,
+    payer: serializeParticipant(e.payer),
+    splits: e.splits.map(serializeExpenseSplit),
+  };
+}
+
 // POST /api/sessions — create a session and its initial participants together
 sessionsRouter.post("/", async (req, res) => {
   // Validate at the boundary: rejects bad shape (e.g. empty names, missing fields) before it reaches Prisma
@@ -89,7 +163,11 @@ sessionsRouter.post("/", async (req, res) => {
     include: { participants: { orderBy: { sort_order: "asc" } } },
   });
 
-  res.status(201).json(session);
+  res.status(201).json({
+    id: session.id,
+    name: session.name,
+    participants: session.participants.map(serializeParticipant),
+  });
 });
 
 // GET /api/sessions/:sessionId — fetch a session with everything needed to render it
@@ -114,7 +192,12 @@ sessionsRouter.get("/:sessionId", async (req, res) => {
     return res.status(404).json({ error: "session not found" });
   }
 
-  res.json(session);
+  res.json({
+    id: session.id,
+    name: session.name,
+    participants: session.participants.map(serializeParticipant),
+    expenses: session.expenses.map(serializeExpense),
+  });
 });
 
 // POST /api/sessions/:sessionId/participants — add one participant to an existing session
@@ -133,10 +216,10 @@ sessionsRouter.post("/:sessionId/participants", async (req, res) => {
   }
 
   const participant = await prisma.participant.create({
-    data: { name, session_id: sessionId },
+    data: { name: name.trim(), session_id: sessionId },
   });
 
-  res.status(201).json(participant);
+  res.status(201).json(serializeParticipant(participant));
 });
 
 // PATCH /api/sessions/:sessionId/participants/:participantId — a participant sets their own payment method
@@ -165,7 +248,7 @@ sessionsRouter.patch("/:sessionId/participants/:participantId", async (req, res)
     data: { payment_method_type, payment_details },
   });
 
-  res.json(updated);
+  res.json(serializeParticipant(updated));
 });
 
 // POST /api/sessions/:sessionId/expenses — add an expense, split EVEN across chosen
@@ -205,6 +288,10 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
     if (!participant_ids.every((id) => participantIdsInSession.has(id))) {
       return res.status(400).json({ error: "participant_ids must all belong to this session" });
     }
+    // A repeated ID would double-charge that person and inflate the even-share denominator
+    if (new Set(participant_ids).size !== participant_ids.length) {
+      return res.status(400).json({ error: "participant_ids must not contain duplicates" });
+    }
 
     // Even share, rounded to the cent — matches how the group already splits bills by hand
     const share = Math.round((amount / participant_ids.length) * 100) / 100;
@@ -221,10 +308,17 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
     if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {
       return res.status(400).json({ error: "each split needs a valid participant_id and a positive amount_owed" });
     }
+    // A repeated participant_id would create two split rows for the same person
+    const customIds = splits.map((s) => s.participant_id);
+    if (new Set(customIds).size !== customIds.length) {
+      return res.status(400).json({ error: "splits must not contain duplicate participant_ids" });
+    }
 
-    // The splits must actually add up to what was paid, or settlements downstream would be wrong
+    // The splits must actually add up to what was paid, or settlements downstream would be wrong.
+    // Tightened to half a centavo (not a full cent) — these are hand-entered amounts, so a
+    // real mismatch should be rejected and fixed by the user rather than silently absorbed.
     const total = splits.reduce((sum, s) => sum + s.amount_owed, 0);
-    if (Math.abs(total - amount) > 0.01) {
+    if (Math.abs(total - amount) > RECONCILED_EPSILON) {
       return res.status(400).json({ error: "splits must sum to the expense amount" });
     }
 
@@ -237,6 +331,11 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
     const { quantity, splits } = body;
     if (!splits.every((s) => participantIdsInSession.has(s.participant_id))) {
       return res.status(400).json({ error: "each split needs a valid participant_id and a positive whole number of units" });
+    }
+    // A repeated participant_id would create two split rows for the same person
+    const quantityIds = splits.map((s) => s.participant_id);
+    if (new Set(quantityIds).size !== quantityIds.length) {
+      return res.status(400).json({ error: "splits must not contain duplicate participant_ids" });
     }
 
     // The per-person units must add up to the total quantity ordered
@@ -277,7 +376,7 @@ sessionsRouter.post("/:sessionId/expenses", async (req, res) => {
     include: { payer: true, splits: { include: { participant: true } } },
   });
 
-  res.status(201).json(expense);
+  res.status(201).json(serializeExpense(expense));
 });
 
 // DELETE /api/sessions/:sessionId/expenses/:expenseId — remove a mistaken or duplicate expense

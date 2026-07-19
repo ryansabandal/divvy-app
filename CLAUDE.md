@@ -25,7 +25,10 @@ divvy/
 │   │   ├── [sessionId]/settle/page.tsx       # Settlement screen
 │   │   └── [sessionId]/view/page.tsx         # Read-only participant view
 │   └── lib/
-│       └── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
+│       ├── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
+│       ├── paymentDetails.ts                 # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
+│       ├── apiUrl.ts                         # apiUrl(path) — builds an absolute backend URL from NEXT_PUBLIC_API_URL
+│       └── fetcher.ts                        # shared SWR fetcher (generic error message parameterized per page)
 ├── backend/
 │   ├── src/
 │   │   ├── index.ts                          # Express app entrypoint
@@ -35,7 +38,8 @@ divvy/
 │   │   ├── schemas/
 │   │   │   └── sessions.ts                   # Zod schemas for request body validation
 │   │   └── lib/
-│   │       └── settle.ts                     # Debt simplification algorithm
+│   │       ├── settle.ts                     # Debt simplification algorithm
+│   │       └── settle.test.ts                # Vitest unit tests, incl. regression coverage for the residual-cent fix
 │   ├── prisma/
 │   │   └── schema.prisma
 │   └── prisma.config.ts                      # DB connection for the Prisma CLI
@@ -118,9 +122,9 @@ enum PaymentMethodType {
 
 ## V1 Features (Strict Scope)
 
-> **Status:** all V1 features below are built, deployed (Railway API + Postgres, Vercel frontend), and validated in production. V1 is **feature-complete** — not yet formally "closed": a short hardening pass comes first. See [README.md](README.md#roadmap--next-steps) for the full roadmap.
+> **Status:** V1 is **feature-complete, deployed, and formally closed** (hardening pass completed 2026-07-19 — a full-repo audit plus every fix it produced). See [README.md](README.md#roadmap--next-steps) for exactly what changed.
 >
-> **Next session priority:** unit tests for `backend/src/lib/settle.ts` (zero test coverage on the app's one piece of pure business logic — highest-value gap). Then, in order: API response-field hygiene (stop leaking `sort_order`/`created_at` into JSON), frontend deduplication (shared `fetcher` + `apiUrl()` helper).
+> **Next up:** no single blocking item. Either groom the backlog filed at `.scratch/v1-hardening-audit/issues/` (12 lower-priority items from the audit — DRY/typing/a11y cleanups, rate limiting, etc.), or start V2 planning (QR Ph upload, receipt OCR, proof-of-payment — all gated on adding file-storage infra).
 
 - [x] Create a session (name the bill, add participants)
 - [x] Add expenses (who paid, how much, description)
@@ -155,6 +159,8 @@ Use greedy debt simplification to minimize the number of transactions:
 4. Repeat until all balances are zero
 
 This is the standard approach used by Splitwise. Implement in `backend/src/lib/settle.ts`.
+
+**Reconciliation tolerance:** balances are compared to zero using `RECONCILED_EPSILON = 0.005` (half a centavo), exported from `settle.ts` and reused by the CUSTOM-split guard in `sessions.ts`. A full-cent threshold (the original value) misclassifies a genuine 1-centavo balance as "already settled" and silently drops it from the plan — found in the 2026-07-19 audit, fixed the same day. Half a centavo is small enough to never swallow a real balance, large enough to absorb floating-point noise from repeated arithmetic on already-rounded amounts.
 
 ## Payment Display
 
@@ -211,6 +217,7 @@ All routes live in `backend/src/routes/sessions.ts` (see the Project Structure s
 - **Local dev parity** — the local environment should mirror production as closely as possible; no "works on my machine" gaps
 - **Container runtime:** Podman (not Docker) — use `podman-compose` for compose workflows
 - **Comments:** Every non-trivial line or block gets a simple one-liner comment explaining what it does — code should be readable to someone seeing it for the first time
+- **Code reviews use subagents:** always run a full code review via parallel subagents rather than one inline pass — default is three, split by *lens* (Correctness, Security, Best-Practice/Smells), each auditing the whole repo, consolidated into one severity-ranked report. Splitting by lens (not by area, e.g. frontend/backend) avoids "seam-blindness," where a bug living in the contract between two areas falls in the gap between two reviewers who each only look at one side.
 
 ## Agent skills
 

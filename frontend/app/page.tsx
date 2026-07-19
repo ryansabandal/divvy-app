@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getRecentSessions, saveRecentSession, type RecentSession } from "@/lib/recentSessions";
+import { apiUrl } from "@/lib/apiUrl";
 
 // Create a session: name the bill, list who's splitting it, then go straight to that session
 export default function CreateSessionPage() {
@@ -50,7 +51,7 @@ export default function CreateSessionPage() {
     }
 
     setSubmitting(true);
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions`, {
+    const res = await fetch(apiUrl("/api/sessions"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: name.trim(), participants: cleanedParticipants }),

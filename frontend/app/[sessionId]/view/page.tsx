@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
+import { parseBankDetails } from "@/lib/paymentDetails";
+import { apiUrl } from "@/lib/apiUrl";
+import { fetcher } from "@/lib/fetcher";
 
 // These interfaces mirror the shapes returned by the two API endpoints this page fetches
 interface Participant {
@@ -53,15 +56,6 @@ interface SettlementsResponse {
   settlements: Settlement[];
 }
 
-// SWR fetcher: returns parsed JSON or throws a readable error on non-2xx
-const fetcher = (url: string) =>
-  fetch(url).then((res) => {
-    if (!res.ok) {
-      throw new Error(res.status === 404 ? "Session not found" : "Failed to load session");
-    }
-    return res.json();
-  });
-
 // Read-only view for participants: shows the expense breakdown and who owes who.
 // No edit forms, no delete buttons, no finalize/recalculate controls.
 export default function ViewPage() {
@@ -70,12 +64,12 @@ export default function ViewPage() {
 
   // Two independent SWR fetches: session data (expenses + participants) + settlement plan
   const { data: session, error: sessionError } = useSWR<Session>(
-    sessionId ? `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}` : null,
-    fetcher,
+    sessionId ? apiUrl(`/api/sessions/${sessionId}`) : null,
+    (url: string) => fetcher(url, "Failed to load session"),
   );
   const { data: settlementsData, error: settlementsError } = useSWR<SettlementsResponse>(
-    sessionId ? `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/settlements` : null,
-    fetcher,
+    sessionId ? apiUrl(`/api/sessions/${sessionId}/settlements`) : null,
+    (url: string) => fetcher(url, "Failed to load session"),
   );
 
   // Tracks which payment-detail row's copy button was just clicked, to show "Copied!" briefly
@@ -209,10 +203,10 @@ export default function ViewPage() {
                           let displayText: string;
                           let copyText: string;
                           if (creditor.payment_method_type === "BANK_TRANSFER") {
-                            const sepIdx = creditor.payment_details.indexOf(" - ");
-                            methodLabel = sepIdx !== -1 ? creditor.payment_details.slice(0, sepIdx) : "Bank";
-                            displayText = sepIdx !== -1 ? creditor.payment_details.slice(sepIdx + 3) : creditor.payment_details;
-                            copyText = displayText;
+                            const { bankName, accountNumber } = parseBankDetails(creditor.payment_details);
+                            methodLabel = bankName || "Bank";
+                            displayText = accountNumber;
+                            copyText = accountNumber;
                           } else {
                             methodLabel = creditor.payment_method_type === "GCASH" ? "GCash" : "Maya";
                             displayText = creditor.payment_details;

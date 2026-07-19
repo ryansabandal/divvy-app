@@ -14,8 +14,9 @@ A simple bill-splitting app for friend groups. See [CLAUDE.md](CLAUDE.md) for fu
 | Backend deployment           | ✅ Deployed on Railway (Express + PostgreSQL); URL lives in the Railway dashboard, not committed here |
 | Frontend deployment          | ✅ Deployed on Vercel; URL lives in the Vercel dashboard, not committed here |
 | Git / GitHub                 | ✅ Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private) |
+| Test coverage                | ✅ Vitest — 8 tests on `backend/src/lib/settle.ts`, the app's one piece of pure business logic |
 
-> **Status:** V1 is **feature-complete and deployed**. Not yet marked "closed" — a short hardening pass (see [Roadmap](#roadmap--next-steps)) comes first.
+> **Status:** V1 is **feature-complete, deployed, and formally closed** (2026-07-19). A full-repo hardening pass (audit + fixes) preceded closing it — see [Roadmap](#roadmap--next-steps) for exactly what was done.
 
 ## High-level flow
 
@@ -58,7 +59,8 @@ backend/
 │   ├── routes/
 │   │   └── sessions.ts        # all /api/sessions/* routes (session-scoped: participants, expenses, settlements)
 │   └── lib/
-│       └── settle.ts          # pure function: net balances in, minimized payment list out — no Prisma/DB calls
+│       ├── settle.ts          # pure function: net balances in, minimized payment list out — no Prisma/DB calls
+│       └── settle.test.ts     # Vitest unit tests, incl. regression coverage for the residual-cent fix (see Roadmap)
 ├── .env                       # DATABASE_URL + PORT for local dev (not committed)
 ├── tsconfig.json
 └── package.json
@@ -118,9 +120,17 @@ All routes are mounted onto one `sessionsRouter` (an Express `Router`) in `sessi
 
 Route param is named `:sessionId` (not the generic `:id`) so it stays unambiguous once a route has multiple ids in scope (e.g. a future `paid_by` or `participantId`).
 
+**Response serialization (fixed 2026-07-19):** every route above now shapes its response through a `serialize*` function (`serializeParticipant`, `serializeExpenseSplit`, `serializeExpense`, alongside the pre-existing `serializeSettlement`) instead of returning raw Prisma rows. Previously, `res.json(session)` etc. serialized whatever Prisma returned verbatim, leaking internal fields the frontend never reads: `sort_order`, `created_at`, `session_id`, and the raw `paid_by` id (superseded by the nested `payer` object). Confirmed against the frontend's own TypeScript interfaces before dropping anything.
+
+Malformed `:sessionId` values (anything not shaped like a UUID) are rejected with a clean 404 by a `sessionsRouter.param("sessionId", ...)` gate, before any route handler or Prisma call runs — previously a non-UUID id reached Postgres as a raw "invalid input syntax" error and surfaced as a 500.
+
 ### Settlement algorithm (`backend/src/lib/settle.ts`)
 
-A pure function, deliberately kept free of Prisma/database calls: `computeSettlements(balances)` takes a list of `{ participantId, balance }` (positive = owed money, negative = owes money) and returns the minimized list of `{ from_id, to_id, amount }` payments, via greedy debt simplification (sort creditors and debtors by size, repeatedly match the largest of each until both lists empty). The settlements routes do the I/O — fetching expenses, computing each participant's net balance via the `computeNetBalances` helper in `sessions.ts` — then hand the result to this function. Keeping the algorithm itself I/O-free makes it independently testable and easy to reason about.
+A pure function, deliberately kept free of Prisma/database calls: `computeSettlements(balances)` takes a list of `{ participantId, balance }` (positive = owed money, negative = owes money) and returns the minimized list of `{ from_id, to_id, amount }` payments, via greedy debt simplification (sort creditors and debtors by size, repeatedly match the largest of each until both lists empty). The settlements routes do the I/O — fetching expenses, computing each participant's net balance via the `computeNetBalances` helper in `sessions.ts` — then hand the result to this function. Keeping the algorithm itself I/O-free makes it independently testable and easy to reason about — see `settle.test.ts` for 8 tests exercising it directly.
+
+**Reconciliation tolerance (fixed 2026-07-19):** balances are compared to zero via `RECONCILED_EPSILON = 0.005` (half a centavo), exported from `settle.ts` and reused by the CUSTOM-split guard in `sessions.ts`. The original threshold was a full cent (`0.01`), reused from the "absorb floating-point noise" intent — but a full cent is *also* large enough to misclassify a genuine 1-centavo balance as already settled, silently dropping it from the plan. Concrete failure case the audit found: someone paid ₱0.02, split between two others at ₱0.01 each — both were filtered out as "settled," and the payer was never reimbursed. Half a centavo fixes this: still large enough to absorb real float noise (~1e-13 from repeated arithmetic on already-rounded amounts), small enough to never touch a genuine cent-scale balance. Both failure scenarios are now regression tests in `settle.test.ts`.
+
+The CUSTOM split guard (in `sessions.ts`) was tightened the same day for the same reason: it used to accept splits off by up to a full cent from the expense total and store them as-is. It now rejects anything past half a centavo (reusing `RECONCILED_EPSILON`) rather than silently absorbing the difference — unlike EVEN/QUANTITY, where the *system* computes the per-person amounts and so owns the rounding, CUSTOM amounts are hand-entered by the user, so a real mismatch should come back as an error for them to fix, not a silent correction.
 
 ### Finalize / recalculate / mark-as-paid
 
@@ -144,6 +154,8 @@ Expenses stay editable at all times, even after finalizing — there's no lock. 
 | `npm start`          | Run the compiled server (production)          |
 | `npm run prisma:migrate` | Create/apply a new migration              |
 | `npm run prisma:generate` | Regenerate the Prisma Client after schema changes |
+| `npm test`           | Run the Vitest suite once (`settle.ts` coverage)  |
+| `npm run test:watch` | Run Vitest in watch mode                     |
 
 ## Frontend (`frontend/`)
 
@@ -158,16 +170,23 @@ frontend/
 │   ├── [sessionId]/page.tsx              # session view — add/delete expenses (3 split modes), inline payment-method entry, share + settle buttons
 │   ├── [sessionId]/settle/page.tsx       # settle screen — preview/finalize/recalculate, mark-as-paid, progress bar, copy-to-pay
 │   └── [sessionId]/view/page.tsx         # read-only participant view — expense breakdown + settlement plan, no edit controls
+├── lib/
+│   ├── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
+│   ├── paymentDetails.ts                 # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
+│   ├── apiUrl.ts                         # apiUrl(path) — builds an absolute backend URL from NEXT_PUBLIC_API_URL
+│   └── fetcher.ts                        # shared SWR fetcher (generic error message parameterized per page)
 └── .env.local                            # NEXT_PUBLIC_API_URL=http://localhost:4000 (NEXT_PUBLIC_ prefix required for any var read in browser-side code)
 ```
 
-**Data fetching:** uses **SWR** (`useSWR`) for client-side GET (not `useEffect`+`useState`) — chosen to satisfy the `react-hooks/set-state-in-effect` lint rule, which discourages fetch-in-effect. `mutate()` refetches after mutations. Form defaults are derived at render (no `setState` in an effect).
+**Data fetching:** uses **SWR** (`useSWR`) for client-side GET (not `useEffect`+`useState`) — chosen to satisfy the `react-hooks/set-state-in-effect` lint rule, which discourages fetch-in-effect. `mutate()` refetches after mutations. Form defaults are derived at render (no `setState` in an effect). The fetcher itself and the `NEXT_PUBLIC_API_URL` base-URL lookup are shared helpers (fixed 2026-07-19, see Roadmap): `frontend/lib/fetcher.ts` (takes a per-page fallback error message as a parameter, since the pages' wording differed slightly) and `frontend/lib/apiUrl.ts` (`apiUrl(path)`), used by all four pages instead of three copy-pasted fetchers and ~12 hand-concatenated URLs.
 
 **Add-expense form** has three split modes, all posting to `POST .../expenses`: **Evenly** (`EVEN`, participant checkboxes), **Quantity** (`QUANTITY`, total quantity → per-person units, backend computes amounts, "units remaining" guard), **Amount** (`CUSTOM`, per-person pesos, "remaining to split" guard). Amount/units inputs are `type="text"` (no number spinners) and clamp so totals can't exceed the expense.
 
 Backend needed one change to support this: `cors` middleware added in `backend/src/index.ts`, since the frontend (`localhost:3000`) and backend (`localhost:4000`) are different origins and browsers block cross-origin `fetch()` by default. The middleware is restricted to an explicit origin allow-list (localhost for dev + the Vercel production origin) rather than a wildcard, so only the known frontends can call the API.
 
 **Payment-method entry** is inline on the session view: tapping a participant's row in "Who's splitting" expands a small form. GCash and Maya show a single phone-number input. Bank Transfer shows two inputs (bank name + account number) which are combined on save into `"Bank Name - Account Number"` and stored in `payment_details`. On the settle screen, only the account number is copied to clipboard — the bank name is shown as the label (`BPI ·`) for context. `PATCH`es `.../participants/:participantId` on save. No identity gating — consistent with the rest of the app, anyone with the link can set anyone's payment method.
+
+The `"Bank Name - Account Number"` split/join logic lives in one place, `frontend/lib/paymentDetails.ts` (`parseBankDetails`/`formatBankDetails`) — until 2026-07-19 it was hand-written with a magic `+3` (the separator's length) independently in the session-view edit form, the settle screen, and the read-only view, which is exactly the kind of duplication where one drifting copy would silently corrupt bank details.
 
 **Payment display** on the settle screen reads each settlement row's creditor's payment method via a second `useSWR` call to `GET /api/sessions/:sessionId` (shares the SWR cache, often instant). GCash, Maya, and Bank Transfer all follow the same pattern: a label, the copyable detail, and a "Copy" button (Clipboard API). There are no GCash/Maya deep links — neither app exposes a public URL that pre-fills a peer transfer, so a "Pay via GCash" button would be misleading. The V2 plan is QR Ph codes, which GCash, Maya, and most banks all support natively; see CLAUDE.md's "Out of Scope for V1" section.
 
@@ -183,13 +202,32 @@ Single root-level `.gitignore` (covers `node_modules/`, `dist/`, `.env`/`.env.*`
 
 ## Roadmap / next steps
 
-V1 is feature-complete and deployed. Before marking it "closed," a short **hardening pass** comes next, then V2.
+V1 is feature-complete, deployed, and **formally closed** (2026-07-19) — the hardening pass below is done, and there's no single blocking item for next session.
 
-### Hardening (next priority)
+### Hardening (complete — 2026-07-19)
 
-- **Unit tests for `settle.ts`** — the settlement algorithm is deliberately pure/I/O-free so it can be tested in isolation, but currently has zero tests. This is the highest-value item: it's the one piece of real business logic, and it's already shaped for testing. Add a test runner (e.g. `vitest`) and cover the balance→plan cases, including the rounding-remainder edge cases.
-- **API response leaks** — `GET /api/sessions/:sessionId` returns full Prisma `Participant` rows, so internal fields (`sort_order`, `created_at`) are serialized into the JSON the browser receives. Add explicit `select` clauses (or a serializer) so responses only expose intended fields.
-- **Frontend duplication** — the SWR `fetcher` is copy-pasted identically across `page.tsx`, `settle/page.tsx`, and `view/page.tsx`, and `process.env.NEXT_PUBLIC_API_URL` is hand-concatenated in ~12 places. Extract a shared `fetcher` and an API-base helper (e.g. `apiUrl(path)`) so the base URL and fetch behaviour live in one place.
+Method: a full-repo audit ran **first**, via three parallel subagents split by *lens* — Correctness, Security, Best-Practice/Smells, each auditing the whole repo independently, consolidated into one severity-ranked report (see [CLAUDE.md](CLAUDE.md#engineering-principles) for why lens-split beats an area split like frontend/backend: it avoids "seam-blindness," a bug in the contract between two areas falling in the gap between two reviewers who each only look at one side). Findings were then triaged: bugs/correctness in scope for closing V1, smells/nice-to-haves backlogged. The security review came back clean on the big risk — cross-session IDOR is properly defended, every route scopes its lookup by `session_id` — plus no injection, no XSS, no committed secrets, and CORS already correctly restricted.
+
+A real settlement-math bug surfaced during the audit (see below). Per the standing decision on money-as-`Float` (last section), it was **contained locally** with a tolerance fix rather than used as a reason to do the bigger integer-centavos refactor.
+
+Fixed, in order:
+
+1. **Unit tests for `settle.ts`** — added Vitest (`npm test` runs once, `npm run test:watch` for interactive dev — replacing the old placeholder script that just exited 1) and 8 tests in `settle.test.ts`: the plain cases (empty input, exact single match, everyone-already-settled, greedy-minimizes-transaction-count) plus two regression tests encoding the exact residual-cent bug below.
+2. **Settlement residual-cent bug** — see the "Reconciliation tolerance" paragraph under Settlement algorithm above for the full explanation. Short version: a `0.01` threshold meant to absorb floating-point noise was also large enough to misclassify a genuine 1-centavo balance as "already settled," silently dropping it from the plan. Fixed by introducing `RECONCILED_EPSILON = 0.005` (half a centavo).
+3. **CUSTOM-split guard tightened** — reused the same `RECONCILED_EPSILON` fix to reject hand-entered splits off by more than half a centavo, instead of silently accepting up to a full cent of drift (see the paragraph under Settlement algorithm for why CUSTOM rejects rather than auto-absorbs, unlike EVEN/QUANTITY).
+4. **Duplicate participant IDs** — nothing rejected a repeated id inside `participant_ids` (EVEN) or a `splits` array (CUSTOM/QUANTITY), which double-charged that person and inflated the even-share denominator while the totals still "added up." Now rejected (a `Set` size check) in all three split branches, in `sessions.ts`.
+5. **Malformed session ids returned 500, not 404** — a non-UUID `:sessionId` reached Postgres as a raw "invalid input syntax for type uuid" error before the route's own `if (!session) 404` check could ever run. Fixed with one `sessionsRouter.param("sessionId", ...)` gate that validates the format up front — for every route with that param, in one place, before any handler or Prisma call runs.
+6. **Untrimmed participant name** — `POST .../participants` validated `name.trim()` for emptiness but then persisted the untrimmed `name`, so `"  Bob  "` kept its whitespace. Now stores `name.trim()`, matching how session creation already worked.
+7. **Input size bounds** — the Zod schemas had `.min()` on arrays but no `.max()` anywhere, so one request (under Express's ~100KB body limit) could still nest an unbounded number of participants or splits. Added caps: 50 participants per session, 50 entries per `participant_ids`/`splits` array, 100-char name fields, 200-char descriptions.
+8. **API response leaks** — see the "Response serialization" paragraph under API routes above. Five routes returned raw Prisma rows (`sort_order`, `created_at`, `session_id`, the raw `paid_by` id all leaked into JSON); now every route serializes through `serializeParticipant`/`serializeExpenseSplit`/`serializeExpense`, matching the pattern `serializeSettlement` already established.
+9. **Frontend duplication** — see the "Data fetching" paragraph under Frontend above. Extracted `frontend/lib/fetcher.ts` and `frontend/lib/apiUrl.ts`, replacing three copy-pasted `fetcher` definitions and ~12 hand-concatenated `NEXT_PUBLIC_API_URL` call sites across all four pages.
+10. **Bank-details parsing duplicated 3×** — see the paragraph under "Payment-method entry" above. Extracted to `frontend/lib/paymentDetails.ts`.
+
+Verified, not just written: backend `tsc --noEmit` clean, all 8 Vitest tests passing, frontend `tsc --noEmit` clean, and a full `next build` succeeded across all four routes.
+
+**Backlogged from the same audit** — lower-priority; filed as individual tickets under `.scratch/v1-hardening-audit/issues/01` through `12` (per the local-markdown issue tracker convention — see `docs/agents/issue-tracker.md`), not fixed today: no rate limiting on any endpoint, error disclosure that depends on `NODE_ENV` being set, no shared frontend types module (interfaces duplicated byte-for-byte across pages), the settlement-screen payment-action UI duplicated between the settle and view pages, repeated money-rounding logic with no named util, inconsistent request validation (Zod in some routes, hand-rolled `typeof` checks in others — notably the two participant routes untouched by fix #7 above), near-identical `handleFinalize`/`handleRecalculate` handlers, CORS origins hardcoded in source instead of an env var, the non-idiomatic `React.SubmitEvent` type (should be `FormEvent`), one stale comment that undersold a 3-way branch as 2-way, a settlement progress bar with no ARIA semantics, and `noUncheckedIndexedAccess` left off in both tsconfigs.
+
+**Pre-existing, unrelated to this pass:** `npm audit` flags 3 moderate-severity vulnerabilities in Prisma's own dev tooling (`@hono/node-server`, via `@prisma/dev`) — fixing them requires a Prisma downgrade, so this was left alone and is just noted here for awareness.
 
 ### V2 (explicitly deferred, not in V1 scope)
 
@@ -201,4 +239,4 @@ All three need file-storage infrastructure this stack doesn't have yet — solve
 
 ### Considered but intentionally not scheduled
 
-- **Money as integer centavos** — amounts are stored as `Float`, so rounding logic is scattered. Switching to integer centavos (or `Decimal`) would remove a class of rounding bugs, but the current per-cent-remainder reconciliation is working, so this is noted, not planned.
+- **Money as integer centavos** — amounts are stored as `Float`, so rounding logic is scattered. Switching to integer centavos (or `Decimal`) would remove a class of rounding bugs, but the current per-cent-remainder reconciliation is working, so this is noted, not planned. Re-confirmed during the 2026-07-19 audit: a real rounding bug *was* found (see Hardening above), and the deliberate decision was to contain it with a tolerance fix rather than treat it as the trigger for this larger refactor.

@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { saveRecentSession } from "@/lib/recentSessions";
+import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
+import { apiUrl } from "@/lib/apiUrl";
+import { fetcher } from "@/lib/fetcher";
 
 // Shape of the data returned by GET /api/sessions/:sessionId
 interface Participant {
@@ -39,15 +42,6 @@ interface Session {
   expenses: Expense[];
 }
 
-// SWR calls this with the key (the URL); it returns the parsed JSON or throws on a bad response
-const fetcher = (url: string) =>
-  fetch(url).then((res) => {
-    if (!res.ok) {
-      throw new Error(res.status === 404 ? "Session not found" : "Failed to load session");
-    }
-    return res.json();
-  });
-
 // Session view: show the bill, who's in it, every expense, and a form to add more
 export default function SessionPage() {
   // useParams reads the [sessionId] segment from the URL (returned directly in a client component)
@@ -56,8 +50,8 @@ export default function SessionPage() {
   // SWR owns the fetching, caching, and re-render — no useEffect/useState/useCallback for the data.
   // mutate() re-runs the fetcher so we can refresh the list after adding an expense.
   const { data: session, error, mutate } = useSWR<Session>(
-    sessionId ? `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}` : null,
-    fetcher,
+    sessionId ? apiUrl(`/api/sessions/${sessionId}`) : null,
+    (url: string) => fetcher(url, "Failed to load session"),
   );
 
   // Once the session loads, remember it on this device — covers both "just created it"
@@ -127,14 +121,9 @@ export default function SessionPage() {
 
     // Bank transfer is stored as "Bank Name - Account Number" — split into the two separate fields
     if (p.payment_method_type === "BANK_TRANSFER" && p.payment_details) {
-      const separatorIndex = p.payment_details.indexOf(" - ");
-      if (separatorIndex !== -1) {
-        setBankName(p.payment_details.slice(0, separatorIndex));
-        setPaymentDetails(p.payment_details.slice(separatorIndex + 3));
-      } else {
-        setBankName("");
-        setPaymentDetails(p.payment_details);
-      }
+      const { bankName, accountNumber } = parseBankDetails(p.payment_details);
+      setBankName(bankName);
+      setPaymentDetails(accountNumber);
     } else {
       setBankName("");
       setPaymentDetails(p.payment_details ?? "");
@@ -151,7 +140,7 @@ export default function SessionPage() {
       if (bankName.trim() === "") { setPaymentMethodError("Enter the bank name"); return; }
       if (paymentDetails.trim() === "") { setPaymentMethodError("Enter the account number"); return; }
       // Combine into the stored format — only the account number is copied on the settle screen
-      details = `${bankName.trim()} - ${paymentDetails.trim()}`;
+      details = formatBankDetails(bankName.trim(), paymentDetails.trim());
     } else {
       if (paymentDetails.trim() === "") { setPaymentMethodError("Enter your phone number"); return; }
       details = paymentDetails.trim();
@@ -159,7 +148,7 @@ export default function SessionPage() {
 
     setSavingPaymentMethod(true);
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/participants/${participantId}`,
+      apiUrl(`/api/sessions/${sessionId}/participants/${participantId}`),
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -185,7 +174,7 @@ export default function SessionPage() {
     setDeleteError(null);
     setDeletingExpenseId(expenseId);
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/expenses/${expenseId}`,
+      apiUrl(`/api/sessions/${sessionId}/expenses/${expenseId}`),
       { method: "DELETE" },
     );
     if (!res.ok) {
@@ -308,7 +297,7 @@ export default function SessionPage() {
     }
 
     setSubmitting(true);
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/${sessionId}/expenses`, {
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/expenses`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
