@@ -229,6 +229,20 @@ All routes live in `backend/src/routes/sessions.ts` (see the Project Structure s
 - **Comments:** Every non-trivial line or block gets a simple one-liner comment explaining what it does — code should be readable to someone seeing it for the first time
 - **Code reviews use subagents:** always run a full code review via parallel subagents rather than one inline pass — default is three, split by *lens* (Correctness, Security, Best-Practice/Smells), each auditing the whole repo, consolidated into one severity-ranked report. Splitting by lens (not by area, e.g. frontend/backend) avoids "seam-blindness," where a bug living in the contract between two areas falls in the gap between two reviewers who each only look at one side.
 
+### When to run a review
+
+Reviews fire at **phase/feature boundaries**, not per-change. A boundary is a coherent unit someone can actually judge — not "route 4 of 11 ported."
+
+- **Per-change review is an anti-pattern here.** A reviewer looking at one route mid-port can't check the only thing that matters (does this still match the old behaviour?), and a hook firing on every `Edit` produces noise that trains you to skim. The test suite answers parity continuously; a reviewer answers it worse and at a checkpoint.
+- **Skip mechanical phases.** Data migrations and file moves are verified by "does the data match" and "does it build," not by reading code.
+- **Highest-value review is the one on the test suite itself** — tests that encode wrong behaviour turn every later phase into false confidence, which is worse than no tests.
+
+### Reviews must carry their context
+
+Subagents start cold: they have not read the conversation that produced the change. A review prompt **must** state the contract the change was written against — what is meant to stay identical, what is meant to change, and which tickets are deliberately in scope.
+
+Without it, findings are just the reviewer rediscovering decisions already made, and the real findings get lost in that noise.
+
 ## Agent skills
 
 ### Issue tracker
