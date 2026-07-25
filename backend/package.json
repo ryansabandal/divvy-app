@@ -10,8 +10,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:generate": "prisma generate",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run src/lib",
+    "test:watch": "vitest src/lib",
+    "test:integration": "vitest run src/routes"
   },
   "keywords": [],
   "author": "",
