@@ -240,20 +240,15 @@ describe("POST /api/sessions/:sessionId/participants", () => {
     expect(status).toBe(400);
   });
 
-  // BASELINE, NOT A SPEC — this route validates by hand (`typeof name !== "string"`) rather
-  // than Zod, and has no max-length cap, unlike createSessionSchema's participant names.
-  // That's backlog ticket 06 (inconsistent validation) + ticket 18 (missing max-length) —
-  // both are folded into the Phase 3 route port. When that lands, THIS test is expected to
-  // start failing (a 100-char cap will start rejecting it), and that failure is the signal
-  // the fix landed correctly — not a regression to chase.
-  it("[current behavior, no max-length — see ticket 18] accepts an arbitrarily long name", async () => {
+  // Tickets 06 (inconsistent validation) + 18 (missing max-length) — this route now validates
+  // via addParticipantSchema (Zod), which caps name at 100 chars same as createSessionSchema.
+  it("rejects a name over the 100-char max-length cap", async () => {
     const session = await createSession();
-    const { status, body } = await api(`/api/sessions/${session.id}/participants`, {
+    const { status } = await api(`/api/sessions/${session.id}/participants`, {
       method: "POST",
       body: JSON.stringify({ name: "x".repeat(500) }),
     });
-    expect(status).toBe(201);
-    expect(body.name).toHaveLength(500);
+    expect(status).toBe(400);
   });
 });
 
@@ -355,13 +350,13 @@ describe("PATCH /api/sessions/:sessionId/participants/:participantId", () => {
     expect(status).toBe(400);
   });
 
-  // BASELINE, NOT A SPEC — same gap as the POST test above: no max-length on payment_details.
-  // Expected to start failing once ticket 18 lands in Phase 3.
-  it("[current behavior, no max-length — see ticket 18] accepts arbitrarily long payment_details", async () => {
+  // Ticket 18 — this route now validates via setPaymentMethodSchema (Zod), which caps
+  // payment_details at 200 chars.
+  it("rejects payment_details over the 200-char max-length cap", async () => {
     const session = await createSession();
     const participant = session.participants[0];
 
-    const { status, body } = await api(
+    const { status } = await api(
       `/api/sessions/${session.id}/participants/${participant.id}`,
       {
         method: "PATCH",
@@ -369,8 +364,7 @@ describe("PATCH /api/sessions/:sessionId/participants/:participantId", () => {
       },
     );
 
-    expect(status).toBe(200);
-    expect(body.payment_details).toHaveLength(1000);
+    expect(status).toBe(400);
   });
 });
 
@@ -1105,8 +1099,15 @@ describe("PATCH /api/sessions/:sessionId/expenses — bulk reorder", () => {
       body: JSON.stringify({ expense_ids: newOrder }),
     });
 
-    expect(status).toBe(200);
-    expect(body.map((e: any) => e.id)).toEqual(newOrder);
+    // Ticket 19 — the caller already has the new order, so this returns 204 with no body
+    // instead of re-fetching and re-serializing the full expense list. Verify the reorder
+    // actually took effect via a follow-up GET rather than trusting the PATCH response.
+    expect(status).toBe(204);
+    expect(body).toBeNull();
+
+    // Confirm the reorder actually took effect, not just that PATCH returned success
+    const after = await api(`/api/sessions/${session.id}`);
+    expect(after.body.expenses.map((e: any) => e.id)).toEqual(newOrder);
   });
 
   it("returns 404 when the session doesn't exist", async () => {
