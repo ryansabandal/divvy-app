@@ -23,7 +23,15 @@ async function api(
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     // Spread init.headers last so an individual test could override the content type if needed
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      // Vercel Preview deployments sit behind Deployment Protection (SSO) — this header bypasses
+      // it for automated requests. No-op when unset, i.e. against local dev or Production.
+      ...(process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+        ? { "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
+        : {}),
+      ...init?.headers,
+    },
   });
 
   // 204 (and any empty response) has no JSON to parse — read as text first to stay safe
