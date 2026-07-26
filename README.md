@@ -15,7 +15,7 @@ A simple bill-splitting app for friend groups. See [CLAUDE.md](CLAUDE.md) for fu
 | Frontend deployment          | ✅ Deployed on Vercel; URL lives in the Vercel dashboard, not committed here |
 | Git / GitHub                 | ✅ Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private) |
 | Test coverage                | ✅ Vitest — 8 tests on `backend/src/lib/settle.ts`, the app's one piece of pure business logic |
-| Serverless migration          | 🚧 **In progress** on `develop` — Phase 1 of 5 done (repo restructure), Phase 2 (Supabase) next. See [Target architecture](#target-architecture--single-nextjs-app-migration-in-progress) and [Roadmap](#roadmap--next-steps) |
+| Serverless migration          | 🚧 **In progress** on `develop` — Phase 2 of 5 done (repo restructure + Supabase data migration), Phase 3 (route port) next. See [Target architecture](#target-architecture--single-nextjs-app-migration-in-progress) and [Roadmap](#roadmap--next-steps) |
 
 > **Status:** V1 is **feature-complete, deployed, and formally closed** (2026-07-19). A full-repo hardening pass (audit + fixes) preceded closing it — see [Roadmap](#roadmap--next-steps) for exactly what was done. **`main` still deploys the Railway+Express architecture below unchanged** — the migration only touches `develop`.
 
@@ -58,7 +58,7 @@ flowchart TD
         Settle["lib/settle.ts<br/>✅ moved into place — Phase 1, 2026-07-26"]
     end
 
-    DB[("Supabase Postgres<br/>🚧 pending — Phase 2<br/>Podman Postgres stays the local-dev story, unchanged")]
+    DB[("Supabase Postgres<br/>✅ provisioned + data migrated — Phase 2, 2026-07-26<br/>Podman Postgres stays the local-dev story, unchanged")]
 
     Browser --> Next
     Next -->|"same-origin function call — no HTTP hop, no CORS, once Phase 3 lands"| RouteHandlers
@@ -466,8 +466,10 @@ V1 is feature-complete, deployed, and **formally closed** (2026-07-19) — the h
    - **How:** `git mv`'d the files into `frontend/`, then duplicated fresh copies back into `backend/`'s original paths so the live `:4000` server (and Phase 0's test suite, which points at it) keeps working unmodified — two sources of truth for the few days until Phase 4 deletes `backend/` outright, a deliberate tradeoff over a fragile cross-boundary import.
    - **Also merged:** backend's runtime + dev deps into `frontend/package.json` (`express`/`cors`/`ts-node-dev` deliberately excluded — Express-only, dropped in Phase 3); added `frontend/.env` (`DATABASE_URL`, separate from `.env.local`'s `NEXT_PUBLIC_API_URL`); kept `typescript` at frontend's `^5` rather than backend's `^6.0.3`.
    - **Verified:** `frontend`'s `npx prisma generate` and `npx tsc --noEmit` both clean; `npm run test` — 8/8 passing on `lib/settle.test.ts` in its new home; `backend`'s own test suite still 8/8, confirming the duplicates didn't break the still-live app.
-2. **Supabase setup + data migration** — provision Supabase Postgres, `pg_dump` from Railway → restore (chosen over starting fresh, since shared session links are permanent and a 404 for someone still holding one is a real harm). Two connection strings needed: pooled (PgBouncer) for the running app, direct for Prisma CLI migrations.
-   - **Reordered 2026-07-26** — originally listed after Phase 1 (Supabase-first); swapped because Supabase account setup wasn't done yet and repo restructure has no external blockers, letting the next session start immediately.
+2. ✅ **Done (2026-07-26)** — **Supabase setup + data migration** — provisioned Supabase Postgres (region `ap-southeast-1`, Postgres 17.6) and migrated Railway's production data across via `pg_dump`/restore, rather than starting fresh — shared session links are permanent, and a 404 for someone still holding one is a real harm.
+   - **Reordered 2026-07-26** — originally listed after Phase 1 (Supabase-first); swapped because Supabase account setup wasn't done yet and repo restructure has no external blockers, letting that session start immediately.
+   - **How:** neither Railway nor Supabase's host has `psql`/`pg_dump` installed locally, so both the dump and restore ran via containerized Postgres client images (`podman run postgres:18 pg_dump/psql ...`) — consistent with the "containerize everything" principle rather than installing tooling on the host. Used a `postgres:18` client to match Railway's server major version (18.4); Supabase itself runs 17.6. Also had to swap Railway's private `postgres.railway.internal` host for its public proxy address (`*.proxy.rlwy.net`) — the private host only resolves inside Railway's own network.
+   - **Verified:** row counts match exactly across all 5 tables (sessions 7, participants 21, expenses 47, splits 105, settlements 8); all 8 `_prisma_migrations` rows match Railway's; `npx prisma migrate status` against Supabase reports "Database schema is up to date!" with zero drift. Railway remains fully live and untouched — this phase only stood up a new, separate database, so it carries zero cutover risk. Both connection strings (direct + pooled) are held for Phase 4's Vercel env vars — never written to a tracked file.
 3. **Port the 11 routes** to Next.js Route Handlers, folding in 9 backlog tickets whose fixes are absorbed by the rewrite (see disposition below). The Express `sessionsRouter.param("sessionId", ...)` UUID gate and the 4-argument error handler have no Route Handler equivalent — those need a redesigned shared wrapper, which is the one genuine design task in this phase. **Run the Phase 0 suite against `:3000` when done — green on both `:4000` and `:3000` is the parity proof.**
 4. **Deploy** — Vercel env vars (pooled + direct Supabase URLs), a **required** weekly GitHub Actions keepalive hitting a trivial endpoint (prevents Supabase's 7-day inactivity pause — not optional), then decommission Railway.
 5. **Post-migration tickets** — 01 (rate limiting: needs a serverless-compatible approach, `express-rate-limit` won't work) and 12 (`noUncheckedIndexedAccess`: one tsconfig instead of two).
