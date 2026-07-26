@@ -24,39 +24,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { saveRecentSession } from "@/lib/recentSessions";
 import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
 import { fetcher } from "@/lib/fetcher";
-
-// Shape of the data returned by GET /api/sessions/:sessionId
-interface Participant {
-  id: string;
-  name: string;
-  payment_method_type: string | null;
-  payment_details: string | null;
-}
-
-interface ExpenseSplit {
-  id: string;
-  participant_id: string;
-  amount_owed: number;
-  units: number | null;
-  participant: Participant;
-}
-
-interface Expense {
-  id: string;
-  amount: number;
-  description: string;
-  split_type: "EVEN" | "CUSTOM" | "QUANTITY";
-  quantity: number | null;
-  payer: Participant;
-  splits: ExpenseSplit[];
-}
-
-interface Session {
-  id: string;
-  name: string;
-  participants: Participant[];
-  expenses: Expense[];
-}
+import type { Participant, Expense, Session } from "@/lib/types";
 
 // One draggable expense card. Pulled out as its own component (rather than inlined in a .map())
 // because useSortable must be called once per item, and hooks can't be called inside a callback.
@@ -226,7 +194,7 @@ export default function SessionPage() {
       return;
     }
     setExpandedParticipantId(p.id);
-    setPaymentMethodType((p.payment_method_type as "GCASH" | "MAYA" | "BANK_TRANSFER") || "GCASH");
+    setPaymentMethodType(p.payment_method_type || "GCASH");
     setPaymentMethodError(null);
 
     // Bank transfer is stored as "Bank Name - Account Number" — split into the two separate fields

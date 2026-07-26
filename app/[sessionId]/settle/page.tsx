@@ -6,44 +6,9 @@ import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { parseBankDetails } from "@/lib/paymentDetails";
 import { fetcher } from "@/lib/fetcher";
-import { buildParticipantBreakdown, type BreakdownExpense } from "@/lib/expenseBreakdown";
+import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
-
-// One payment in the settlement plan. id/paid are only present once the plan is frozen —
-// a live preview (computed fresh, not yet persisted) omits both.
-interface Settlement {
-  id?: string;
-  from_id: string;
-  from_name: string;
-  to_id: string;
-  to_name: string;
-  amount: number;
-  paid?: boolean;
-}
-
-// The endpoint wraps the list with a flag for whether it's a frozen plan or a live preview,
-// and a stale flag for when expenses changed after the plan was finalized
-interface SettlementsResponse {
-  frozen: boolean;
-  stale: boolean;
-  settlements: Settlement[];
-}
-
-// Just enough of GET /api/sessions/:sessionId to look up a creditor's payment method and to
-// break down what each debtor is being charged for
-interface Participant {
-  id: string;
-  name: string;
-  payment_method_type: "GCASH" | "MAYA" | "BANK_TRANSFER" | null;
-  payment_details: string | null;
-}
-
-interface Session {
-  participants: Participant[];
-  // Typed via the breakdown module's own minimal shape rather than redeclaring the full Expense
-  // interface a fourth time across the app
-  expenses: BreakdownExpense[];
-}
+import type { Session, Settlement, SettlementsResponse } from "@/lib/types";
 
 // Settlement screen: live preview until finalized, then a trackable plan with paid checkboxes
 export default function SettlePage() {

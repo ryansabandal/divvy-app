@@ -20,7 +20,8 @@ export async function parseBody<T>(request: Request, schema: z.ZodType<T>): Prom
   const json = await parseJsonBody(request);
   const result = schema.safeParse(json);
   if (!result.success) {
-    return { ok: false, response: NextResponse.json({ error: result.error.issues[0].message }, { status: 400 }) };
+    const message = result.error.issues[0]?.message ?? "Invalid request body";
+    return { ok: false, response: NextResponse.json({ error: message }, { status: 400 }) };
   }
   return { ok: true, data: result.data };
 }

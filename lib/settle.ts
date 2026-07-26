@@ -4,7 +4,10 @@ export interface ParticipantBalance {
   balance: number;
 }
 
-export interface Settlement {
+// One payment in a simplified plan. Named distinctly from lib/types.ts's Settlement (the
+// persisted/API-facing shape, with id/names/paid) to avoid two same-named, differently-shaped
+// types across the codebase.
+export interface SettlementTransfer {
   from_id: string; // who owes
   to_id: string; // who is owed
   amount: number;
@@ -18,7 +21,7 @@ export const RECONCILED_EPSILON = 0.005;
 
 // Greedy debt simplification: repeatedly match the largest creditor with the largest
 // debtor so the group ends up with the fewest possible number of payments
-export function computeSettlements(balances: ParticipantBalance[]): Settlement[] {
+export function computeSettlements(balances: ParticipantBalance[]): SettlementTransfer[] {
   // Ignore anyone already settled (within RECONCILED_EPSILON, to absorb float noise) and work on copies
   const creditors = balances
     .filter((b) => b.balance > RECONCILED_EPSILON)
@@ -29,13 +32,14 @@ export function computeSettlements(balances: ParticipantBalance[]): Settlement[]
     .map((b) => ({ participantId: b.participantId, balance: -b.balance })) // store as a positive amount owed
     .sort((a, b) => b.balance - a.balance);
 
-  const settlements: Settlement[] = [];
+  const settlements: SettlementTransfer[] = [];
   let i = 0;
   let j = 0;
 
   while (i < creditors.length && j < debtors.length) {
-    const creditor = creditors[i];
-    const debtor = debtors[j];
+    // Safe: the while guard above already bounds both indices
+    const creditor = creditors[i]!;
+    const debtor = debtors[j]!;
     const amount = Math.round(Math.min(creditor.balance, debtor.balance) * 100) / 100;
 
     settlements.push({ from_id: debtor.participantId, to_id: creditor.participantId, amount });

@@ -39,8 +39,9 @@ export function buildExpenseSplits(
     // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
     const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
     const remainder = Math.round((amount - allocated) * 100) / 100;
-    if (remainder !== 0) {
-      splitRows[0].amount_owed = Math.round((splitRows[0].amount_owed + remainder) * 100) / 100;
+    const first = splitRows[0];
+    if (remainder !== 0 && first) {
+      first.amount_owed = Math.round((first.amount_owed + remainder) * 100) / 100;
     }
 
     return { ok: true, splitRows, expenseQuantity: null };
@@ -97,8 +98,9 @@ export function buildExpenseSplits(
   // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
   const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
   const remainder = Math.round((amount - allocated) * 100) / 100;
-  if (remainder !== 0) {
-    splitRows[0].amount_owed = Math.round((splitRows[0].amount_owed + remainder) * 100) / 100;
+  const first = splitRows[0];
+  if (remainder !== 0 && first) {
+    first.amount_owed = Math.round((first.amount_owed + remainder) * 100) / 100;
   }
 
   return { ok: true, splitRows, expenseQuantity: quantity };

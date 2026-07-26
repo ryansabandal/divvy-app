@@ -7,55 +7,7 @@ import { parseBankDetails } from "@/lib/paymentDetails";
 import { fetcher } from "@/lib/fetcher";
 import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
-
-// These interfaces mirror the shapes returned by the two API endpoints this page fetches
-interface Participant {
-  id: string;
-  name: string;
-  payment_method_type: "GCASH" | "MAYA" | "BANK_TRANSFER" | null;
-  payment_details: string | null;
-}
-
-interface ExpenseSplit {
-  id: string;
-  participant_id: string;
-  amount_owed: number;
-  units: number | null;
-  participant: Participant;
-}
-
-interface Expense {
-  id: string;
-  amount: number;
-  description: string;
-  split_type: "EVEN" | "CUSTOM" | "QUANTITY";
-  quantity: number | null;
-  payer: Participant;
-  splits: ExpenseSplit[];
-}
-
-interface Session {
-  id: string;
-  name: string;
-  participants: Participant[];
-  expenses: Expense[];
-}
-
-interface Settlement {
-  id?: string;
-  from_id: string;
-  from_name: string;
-  to_id: string;
-  to_name: string;
-  amount: number;
-  paid?: boolean;
-}
-
-interface SettlementsResponse {
-  frozen: boolean;
-  stale: boolean;
-  settlements: Settlement[];
-}
+import type { Session, SettlementsResponse } from "@/lib/types";
 
 // Read-only view for participants: shows the expense breakdown and who owes who.
 // No edit forms, no delete buttons, no finalize/recalculate controls.

@@ -1,4 +1,4 @@
-Status: backlog (not blocking V1 close)
+Status: resolved (2026-07-26) — two Vercel WAF custom rules, no application code. Rate-limit rule: `/api/*`, all methods, 50 req/IP/60s, deny 1m. Bypass rule: requests carrying the existing `x-vercel-protection-bypass` automation secret skip the limit entirely, so the integration suite (182 mutating + GET requests/run) doesn't have to share headroom with the real-world cap. Verified live against production: 80/80 integration tests pass, and a manual curl loop confirms 429s past the threshold on both a mutating route and `GET /api/health`. See README.md's "Rate limiting (Vercel WAF)" section for the durable record.
 Severity: Medium
 Category: Security
 

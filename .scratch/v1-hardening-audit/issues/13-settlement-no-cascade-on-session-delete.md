@@ -1,4 +1,4 @@
-Status: backlog (not blocking V1 close)
+Status: resolved (2026-07-26) — added `onDelete: Cascade` to `Settlement.session` only; `Settlement.debtor`/`.creditor` and `Participant.expenses`/`.splits`/`.owes`/`.owed` deliberately left RESTRICT, since no route deletes a Participant and a loud FK error beats silent data loss on one side of a payment plan (documented in `prisma/schema.prisma`, corrected once by review for accuracy — see the ticket 03 note above for the cross-file cleanup). Migration `20260726103632_settlement_cascade_on_session_delete` applied to local Podman Postgres only; not yet applied to Supabase production (deliberate — a future standalone step, not this cleanup pass).
 Severity: Low
 Category: Correctness
 

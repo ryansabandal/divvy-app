@@ -31,10 +31,8 @@ export function settlementPlansMatch(
   const key = (s: { from_id: string; to_id: string }) => `${s.from_id}:${s.to_id}`;
   const sortedFrozen = [...frozen].sort((a, b) => key(a).localeCompare(key(b)));
   const sortedLive   = [...live].sort((a, b) => key(a).localeCompare(key(b)));
-  return sortedFrozen.every(
-    (f, i) =>
-      f.from_id === sortedLive[i].from_id &&
-      f.to_id   === sortedLive[i].to_id &&
-      Math.abs(f.amount - sortedLive[i].amount) < 0.01,
-  );
+  return sortedFrozen.every((f, i) => {
+    const l = sortedLive[i];
+    return !!l && f.from_id === l.from_id && f.to_id === l.to_id && Math.abs(f.amount - l.amount) < 0.01;
+  });
 }
