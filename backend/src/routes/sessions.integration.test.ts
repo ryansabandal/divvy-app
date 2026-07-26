@@ -309,6 +309,22 @@ describe("PATCH /api/sessions/:sessionId/participants/:participantId", () => {
     expect(status).toBe(404);
   });
 
+  // Unlike :sessionId, there's no router.param() UUID gate on :participantId — it flows straight
+  // into a scoped findFirst(). Since the id column is TEXT (not a native Postgres uuid type),
+  // an arbitrary string is a legal query value that just finds no row, so this already 404s
+  // cleanly today. Pinning it so a port can't regress into the same bug class fixed for sessionId.
+  it("returns 404 (not 500) for a malformed participant id", async () => {
+    const session = await createSession();
+    const { status } = await api(
+      `/api/sessions/${session.id}/participants/not-a-uuid`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ payment_method_type: "GCASH", payment_details: "0917" }),
+      },
+    );
+    expect(status).toBe(404);
+  });
+
   it("rejects a payment_method_type outside the enum", async () => {
     const session = await createSession();
     const participant = session.participants[0];
@@ -390,6 +406,60 @@ describe("POST /api/sessions/:sessionId/expenses — EVEN split", () => {
     // 300 / 3 participants — divides evenly, so no remainder-pushing kicks in here
     const amounts = body.splits.map((s: any) => s.amount_owed).sort((x: number, y: number) => x - y);
     expect(amounts).toEqual([100, 100, 100]);
+  });
+
+  // The session-existence check runs before any split-type branching, so one test covers
+  // this for CUSTOM and QUANTITY too — it's the same code path regardless of split_type.
+  it("returns 404 when the session doesn't exist", async () => {
+    const { status } = await api(
+      "/api/sessions/00000000-0000-4000-8000-000000000000/expenses",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          description: "Ghost session",
+          amount: 100,
+          paid_by: "00000000-0000-4000-8000-000000000001",
+          split_type: "EVEN",
+          participant_ids: ["00000000-0000-4000-8000-000000000001"],
+        }),
+      },
+    );
+    expect(status).toBe(404);
+  });
+
+  it("does not leak internal database columns", async () => {
+    // serializeExpense/serializeExpenseSplit drop session_id, expense_id, and the raw paid_by
+    // id — locking in the shape so a port can't silently start returning raw Prisma rows again
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Shape check",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "EVEN",
+        participant_ids: [a.id, b.id],
+      }),
+    });
+
+    expect(Object.keys(body).sort()).toEqual([
+      "amount",
+      "description",
+      "id",
+      "payer",
+      "quantity",
+      "split_type",
+      "splits",
+    ]);
+    expect(Object.keys(body.splits[0]).sort()).toEqual([
+      "amount_owed",
+      "id",
+      "participant",
+      "participant_id",
+      "units",
+    ]);
   });
 
   it("pushes the rounding remainder onto the first participant so the split sums exactly", async () => {
@@ -526,6 +596,52 @@ describe("POST /api/sessions/:sessionId/expenses — CUSTOM split", () => {
     expect(status).toBe(201);
   });
 
+  // The two tests above/below this line only check comfortably inside/outside 0.005 — neither
+  // would notice if RECONCILED_EPSILON itself changed value. These two straddle the actual
+  // boundary (0.0049 accepted, 0.0051 rejected) to pin the threshold, not just its neighborhood.
+  it("accepts a total exactly at the edge of RECONCILED_EPSILON (0.0049 diff)", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Just inside the epsilon",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "CUSTOM",
+        splits: [
+          { participant_id: a.id, amount_owed: 60 },
+          { participant_id: b.id, amount_owed: 40.0049 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(201);
+  });
+
+  it("rejects a total just past RECONCILED_EPSILON (0.0051 diff)", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Just past the epsilon",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "CUSTOM",
+        splits: [
+          { participant_id: a.id, amount_owed: 60 },
+          { participant_id: b.id, amount_owed: 40.0051 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("splits must sum to the expense amount");
+  });
+
   it("rejects amounts that don't sum to the expense total", async () => {
     // Tightened during the hardening pass: CUSTOM splits are hand-entered by a user, so a
     // real mismatch (unlike EVEN/QUANTITY's system-computed rounding) should be rejected
@@ -625,6 +741,36 @@ describe("POST /api/sessions/:sessionId/expenses — QUANTITY split", () => {
     // Unit price is 60/6 = 10 — a clean division, no remainder-push needed for this assertion
     expect(byParticipant.get(a.id)).toBe(20);
     expect(byParticipant.get(b.id)).toBe(40);
+  });
+
+  it("pushes the rounding remainder onto the first participant, same as EVEN", async () => {
+    // 100 / 3 units = 33.333... per unit — three 1-unit shares round to 33.33 each (99.99 total),
+    // same remainder-push code path as EVEN's 100/3 test, but exercised through the QUANTITY branch
+    const session = await createSessionWithParticipants(3);
+    const [a, b, c] = session.participants;
+
+    const { body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Split three ways by quantity",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "QUANTITY",
+        quantity: 3,
+        splits: [
+          { participant_id: a.id, units: 1 },
+          { participant_id: b.id, units: 1 },
+          { participant_id: c.id, units: 1 },
+        ],
+      }),
+    });
+
+    const byParticipant = new Map(body.splits.map((s: any) => [s.participant_id, s.amount_owed]));
+    const total = body.splits.reduce((sum: number, s: any) => sum + s.amount_owed, 0);
+    expect(total).toBeCloseTo(100, 2);
+    expect(byParticipant.get(a.id)).toBeCloseTo(33.34, 2);
+    expect(byParticipant.get(b.id)).toBeCloseTo(33.33, 2);
+    expect(byParticipant.get(c.id)).toBeCloseTo(33.33, 2);
   });
 
   it("rejects units that don't add up to the declared quantity", async () => {
@@ -789,6 +935,105 @@ describe("PATCH /api/sessions/:sessionId/expenses/:expenseId — edit in place",
     expect(status).toBe(404);
   });
 
+  // Same reasoning as the participant equivalent above: no router.param() gate on :expenseId,
+  // but the id column is TEXT, so an arbitrary string is a legal (non-matching) query value —
+  // this already 404s cleanly today. Pinned so a port can't regress into a 500 here.
+  it("returns 404 (not 500) for a malformed expense id", async () => {
+    const session = await createSessionWithParticipants(2);
+    const { status } = await api(
+      `/api/sessions/${session.id}/expenses/not-a-uuid`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          description: "Ghost",
+          amount: 50,
+          paid_by: session.participants[0].id,
+          split_type: "EVEN",
+          participant_ids: [session.participants[0].id],
+        }),
+      },
+    );
+    expect(status).toBe(404);
+  });
+
+  // The three tests below prove buildExpenseSplits' validation branches are actually wired
+  // into the PATCH handler, not just POST's — the edit route calls the same shared function
+  // but through its own call site, and until now only POST's describe blocks exercised it.
+  it("rejects a duplicate participant_id in an edit's CUSTOM splits", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a] = session.participants;
+    const expense = await createEvenExpense(session);
+
+    const { status, body } = await api(
+      `/api/sessions/${session.id}/expenses/${expense.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          description: "Duplicate on edit",
+          amount: 100,
+          paid_by: a.id,
+          split_type: "CUSTOM",
+          splits: [
+            { participant_id: a.id, amount_owed: 50 },
+            { participant_id: a.id, amount_owed: 50 },
+          ],
+        }),
+      },
+    );
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("splits must not contain duplicate participant_ids");
+  });
+
+  it("rejects a splits total that doesn't sum to the amended amount", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+    const expense = await createEvenExpense(session);
+
+    const { status, body } = await api(
+      `/api/sessions/${session.id}/expenses/${expense.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          description: "Off by a peso on edit",
+          amount: 100,
+          paid_by: a.id,
+          split_type: "CUSTOM",
+          splits: [
+            { participant_id: a.id, amount_owed: 60 },
+            { participant_id: b.id, amount_owed: 39 },
+          ],
+        }),
+      },
+    );
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("splits must sum to the expense amount");
+  });
+
+  it("rejects paid_by that isn't a participant in this session, when editing", async () => {
+    const session = await createSessionWithParticipants(2);
+    const expense = await createEvenExpense(session);
+    const outsider = "00000000-0000-4000-8000-000000000000";
+
+    const { status, body } = await api(
+      `/api/sessions/${session.id}/expenses/${expense.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          description: "Bad payer on edit",
+          amount: 100,
+          paid_by: outsider,
+          split_type: "EVEN",
+          participant_ids: [session.participants[0].id],
+        }),
+      },
+    );
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("paid_by must be a participant in this session");
+  });
+
   it("never 500s when a delete lands concurrently with an edit (ticket 15 regression)", async () => {
     // Ticket 15 (.scratch/v1-hardening-audit/issues/15-edit-route-toctou-500-instead-of-404.md):
     // this route's existence check and its $transaction aren't atomic with each other, so a
@@ -862,6 +1107,14 @@ describe("PATCH /api/sessions/:sessionId/expenses — bulk reorder", () => {
 
     expect(status).toBe(200);
     expect(body.map((e: any) => e.id)).toEqual(newOrder);
+  });
+
+  it("returns 404 when the session doesn't exist", async () => {
+    const { status } = await api(
+      "/api/sessions/00000000-0000-4000-8000-000000000000/expenses",
+      { method: "PATCH", body: JSON.stringify({ expense_ids: [] }) },
+    );
+    expect(status).toBe(404);
   });
 
   it("rejects a partial id list that omits an existing expense", async () => {
@@ -963,6 +1216,14 @@ describe("DELETE /api/sessions/:sessionId/expenses/:expenseId", () => {
     const { status } = await api(`/api/sessions/${sessionA.id}/expenses/${expenseFromB.body.id}`, { method: "DELETE" });
     expect(status).toBe(404);
   });
+
+  // Same reasoning as the malformed-id tests above: no router.param() gate on :expenseId, but
+  // the TEXT id column means an arbitrary string is a legal (non-matching) value — 404s cleanly today.
+  it("returns 404 (not 500) for a malformed expense id", async () => {
+    const session = await createSessionWithParticipants(1);
+    const { status } = await api(`/api/sessions/${session.id}/expenses/not-a-uuid`, { method: "DELETE" });
+    expect(status).toBe(404);
+  });
 });
 
 // Shared setup for the settlement tests below: a session where A paid 100, split evenly with B,
@@ -997,6 +1258,13 @@ describe("GET /api/sessions/:sessionId/settlements — live preview", () => {
     expect(body.settlements).toEqual([]);
   });
 
+  it("returns 404 when the session doesn't exist", async () => {
+    const { status } = await api(
+      "/api/sessions/00000000-0000-4000-8000-000000000000/settlements",
+    );
+    expect(status).toBe(404);
+  });
+
   it("recomputes on every call rather than persisting anything", async () => {
     // Calling GET twice in a row must not itself freeze the plan — only POST does that
     const { session } = await createSessionWithADebt();
@@ -1018,6 +1286,31 @@ describe("POST /api/sessions/:sessionId/settlements — freeze the plan", () => 
     expect(body.settlements[0]).toMatchObject({ from_id: b.id, to_id: a.id, amount: 50, paid: false });
     // Freezing assigns each row its own persistent id — needed for the later PATCH-by-id call
     expect(body.settlements[0].id).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it("does not leak internal database columns", async () => {
+    // serializeSettlement drops session_id and the full debtor/creditor objects in favor of
+    // flat ids + names — locking in the shape so a port can't silently return raw Prisma rows
+    const { session } = await createSessionWithADebt();
+    const { body } = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    expect(Object.keys(body.settlements[0]).sort()).toEqual([
+      "amount",
+      "from_id",
+      "from_name",
+      "id",
+      "paid",
+      "to_id",
+      "to_name",
+    ]);
+  });
+
+  it("returns 404 when the session doesn't exist", async () => {
+    const { status } = await api(
+      "/api/sessions/00000000-0000-4000-8000-000000000000/settlements",
+      { method: "POST" },
+    );
+    expect(status).toBe(404);
   });
 
   it("a subsequent GET returns the same frozen rows, not a fresh computation", async () => {
@@ -1133,6 +1426,19 @@ describe("PATCH /api/sessions/:sessionId/settlements/:settlementId — mark paid
       { method: "PATCH", body: JSON.stringify({ paid: true }) },
     );
 
+    expect(status).toBe(404);
+  });
+
+  // Same reasoning as the earlier malformed-id tests: no router.param() gate on :settlementId,
+  // but the TEXT id column means an arbitrary string is a legal (non-matching) value — 404s cleanly today.
+  it("returns 404 (not 500) for a malformed settlement id", async () => {
+    const { session } = await createSessionWithADebt();
+    await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    const { status } = await api(
+      `/api/sessions/${session.id}/settlements/not-a-uuid`,
+      { method: "PATCH", body: JSON.stringify({ paid: true }) },
+    );
     expect(status).toBe(404);
   });
 
