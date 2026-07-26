@@ -494,13 +494,30 @@ Requested after live use: participants wanted to verify their own charges from t
 - **Verified**, not just written: `tsc --noEmit` clean, full `next build` clean, plus live Playwright runs against two purpose-built sessions — one exercising the offsetting arithmetic (a debtor who also fronted an expense) and one forcing the partial-coverage note (a debtor split across two creditors). Screenshots reviewed; `aria-expanded`/`aria-controls` wiring confirmed against the live DOM.
 - **Drive-by fix:** the read-only view rendered "Annhasn't added a payment method yet" — JSX strips the space after an expression when the text node wraps to another line. Pre-existing (the settle page was unaffected, its equivalent being on a single line), spotted in a verification screenshot, fixed with an explicit `{" "}`.
 
-### V2 (explicitly deferred, not in V1 scope)
+### V2 (scoped 2026-07-26, not started)
 
-All three need file-storage infrastructure this stack doesn't have yet — solve that once for all rather than building upload infra piecemeal:
+All three need file storage — solve that once for all rather than building upload infra piecemeal. Supabase Storage is now available infra (it's *why* Supabase was chosen over Neon in the migration), but no bucket is provisioned yet.
 
 - **QR Ph code upload** for payment methods — the intended end-state for GCash/Maya/bank payments (payer scans instead of copying a number)
 - **Receipt photo OCR** — auto-parse an itemised bill instead of manual entry
 - **Proof-of-payment screenshot upload** — let participants validate a payment was made
+
+The platform constraints these have to be built against are settled and written up in [CLAUDE.md](CLAUDE.md#v2-file-uploads--locked-constraints) — signed direct-upload URLs (Vercel's 4.5 MB body limit rules out proxying), a server-side gatekeeper instead of RLS (this app has no Supabase Auth), and OCR output never auto-committing. A longer working document with per-feature schema sketches and an OCR-provider comparison sits at `.scratch/plans/v2-scoping-guiding-principles.md`, which is **gitignored and local-only** — the two files above carry everything a fresh clone needs.
+
+**Recommended sequencing** (confirm before starting, not final):
+
+1. **Ticket 04 first** — extract the shared `<PaymentAction>` / `<SettlementProgress>` components. Filed as frontend polish, but it's really V2 groundwork: QR Ph display lands in `settle/page.tsx`'s `renderPaymentAction`, proof-of-payment status lands in the settlement row, and both are currently copy-pasted between `settle/page.tsx` and `view/page.tsx`. Doing it first means building each V2 feature once instead of twice. Folding in ticket 11 (progress-bar ARIA) at the same time makes that a one-place fix too.
+2. **Supabase Storage bucket setup** — the shared prerequisite; everything else blocks on it.
+3. **QR Ph upload** — smallest slice, validates the whole upload pipeline end to end with no new external provider.
+4. **Proof-of-payment** — same pipeline, one more surface.
+5. **Receipt OCR last** — the only one adding an external provider *and* a whole new review screen.
+
+**Open product questions** — decide these at the start of the V2 session rather than defaulting into an answer:
+
+- **OCR provider** — Claude API vision vs. Google Document AI vs. Tesseract.js (cost / accuracy / complexity tradeoffs in the scratch doc).
+- **QR Ph upload: replace or supplement** the existing phone/account-number fields? Supplement is the recommendation — participants without a QR Ph code keep the working copy-to-clipboard fallback.
+- **HEIC** — iPhone photos default to it, and browsers and OCR providers don't uniformly support it.
+- **Proof-of-payment: who uploads** — the debtor, the creditor, or either?
 
 ### Considered but intentionally not scheduled
 

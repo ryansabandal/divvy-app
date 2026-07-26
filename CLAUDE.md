@@ -165,25 +165,16 @@ enum PaymentMethodType {
 - Proof-of-payment screenshot upload (for other participants to validate a payment) — deferred to V2 alongside OCR/QR upload, same missing file storage infrastructure
 - Settlement status indicator (checkmark/"Done" on a session in the recent-sessions list once its plan is finalized and fully paid) — idea only, not scheduled; the `Settlement.paid` data already exists, but the recent-sessions list is device-local (`localStorage`), so this needs a batch status endpoint rather than one request per listed session
 
-## V2 Scoping — Pending Discussion (added 2026-07-26)
+## V2 File Uploads — Locked Constraints
 
-Not started. This section is the durable, git-tracked summary of the V2 planning pass — the full research and per-feature detail live in `.scratch/plans/v2-scoping-guiding-principles.md`, but that path is gitignored (`.scratch/plans/*`) and local-only, so anything worth surviving a fresh clone or a new machine belongs here instead.
+All three deferred V2 features (QR Ph upload, receipt OCR, proof-of-payment screenshots) need file storage. These constraints were researched against current platform docs on 2026-07-26 and are **settled** — they're properties of the stack, not preferences to re-litigate. Status, shipping order, and the still-open product questions live in [README.md](README.md#roadmap--next-steps), not here.
 
-**Locked (researched via Context7, not up for re-litigation):**
-- Vercel Functions cap every request/response body at 4.5 MB, on every plan — uploads cannot proxy through a Route Handler. Use Supabase signed direct-upload URLs instead: the client uploads straight to Storage, and the Route Handler only issues a short-lived token.
-- This app has no Supabase Auth (Prisma connects directly to Postgres, bypassing PostgREST/RLS). Don't stand up Supabase Auth just for this — use a server-side gatekeeper pattern: the Route Handler authorizes via Prisma, then uses the Storage service-role key to mint the signed URL.
-- OCR output is never auto-committed. A mandatory human review + per-item participant-assignment step sits between parsed output and any persisted `Expense`/`ExpenseSplit` row. The reviewed result saves as an ordinary `CUSTOM` split — not a new `SplitType`.
-- Recommended shipping order: QR Ph upload first (validates the whole Storage pipeline with the least complexity), then proof-of-payment, then receipt OCR last (most complex — new provider dependency plus new review UI).
-- Recommended bucket shape: one Supabase Storage bucket, folder-prefixed by feature + session id, public read — matches the app's existing "anyone with the session link" trust model; file attachments don't need a stricter standard than the phone numbers/expense amounts already exposed the same way.
+- **Uploads never proxy through a Route Handler.** Vercel Functions cap every request/response body at 4.5 MB on every plan, which a phone photo exceeds. Use Supabase signed direct-upload URLs: the client uploads straight to Storage, and the Route Handler only mints a short-lived token.
+- **No Supabase Auth — use a server-side gatekeeper.** Prisma connects directly to Postgres, bypassing PostgREST and RLS, so Storage's usual `auth.uid()`-based policies don't apply. The Route Handler authorizes the request via Prisma, then uses the Storage service-role key to issue the signed URL. Don't stand up Supabase Auth just for uploads.
+- **Storage layout:** one bucket, folder-prefixed by feature + session id, public read — the same "anyone with the session link" trust model the app already applies to names, phone numbers, and expense amounts. File attachments don't warrant a stricter standard than the data they sit next to.
+- **OCR output is never auto-committed.** A mandatory human review + per-item participant-assignment step sits between parsed output and any persisted `Expense`/`ExpenseSplit` row. The reviewed result saves as an ordinary `CUSTOM` split — no new `SplitType`.
 
-**Open — needs an actual decision at the start of the V2 session (run as an `AskUserQuestion` pass, don't silently pick):**
-1. OCR provider — Claude API vision vs. Google Document AI vs. Tesseract.js (cost/accuracy/complexity tradeoffs detailed in the guiding doc).
-2. QR Ph upload — does it replace the existing phone/account-number fields, or supplement them (recommended, so participants without a QR Ph code keep the working copy-to-clipboard fallback)?
-3. HEIC handling — iPhone photos default to HEIC; browsers and OCR providers don't uniformly support it.
-4. Proof-of-payment — who uploads it: the debtor, the creditor, or either?
-5. Confirm the recommended shipping order above before starting, rather than assuming it's final.
-
-**First implementation step once those are decided:** Supabase Storage bucket setup — every other piece of the trio depends on it.
+Compress images client-side before upload regardless of the 50 MB per-file ceiling; the binding limit is the free tier's 1 GB total / ~10 GB monthly egress over the app's lifetime.
 
 ## Settlement Algorithm
 
