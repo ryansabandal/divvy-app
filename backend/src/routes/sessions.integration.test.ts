@@ -175,3 +175,976 @@ describe("GET /api/sessions/:sessionId", () => {
     expect(body.error).toBe("session not found");
   });
 });
+
+describe("POST /api/sessions/:sessionId/participants", () => {
+  it("adds a participant to an existing session and returns 201", async () => {
+    const session = await createSession();
+
+    const { status, body } = await api(`/api/sessions/${session.id}/participants`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Dave" }),
+    });
+
+    expect(status).toBe(201);
+    expect(body.name).toBe("Dave");
+    expect(body.payment_method_type).toBeNull();
+    expect(body.payment_details).toBeNull();
+  });
+
+  it("trims whitespace from the new participant's name", async () => {
+    const session = await createSession();
+    const { body } = await api(`/api/sessions/${session.id}/participants`, {
+      method: "POST",
+      body: JSON.stringify({ name: "  Dave  " }),
+    });
+    expect(body.name).toBe("Dave");
+  });
+
+  it("does not leak internal database columns", async () => {
+    const session = await createSession();
+    const { body } = await api(`/api/sessions/${session.id}/participants`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Dave" }),
+    });
+    expect(Object.keys(body).sort()).toEqual([
+      "id",
+      "name",
+      "payment_details",
+      "payment_method_type",
+    ]);
+  });
+
+  it("returns 404 when the session doesn't exist", async () => {
+    const { status } = await api(
+      "/api/sessions/00000000-0000-4000-8000-000000000000/participants",
+      { method: "POST", body: JSON.stringify({ name: "Dave" }) },
+    );
+    expect(status).toBe(404);
+  });
+
+  it("rejects an empty name", async () => {
+    const session = await createSession();
+    const { status } = await api(`/api/sessions/${session.id}/participants`, {
+      method: "POST",
+      body: JSON.stringify({ name: "" }),
+    });
+    expect(status).toBe(400);
+  });
+
+  it("rejects a whitespace-only name", async () => {
+    const session = await createSession();
+    const { status } = await api(`/api/sessions/${session.id}/participants`, {
+      method: "POST",
+      body: JSON.stringify({ name: "   " }),
+    });
+    expect(status).toBe(400);
+  });
+
+  // BASELINE, NOT A SPEC — this route validates by hand (`typeof name !== "string"`) rather
+  // than Zod, and has no max-length cap, unlike createSessionSchema's participant names.
+  // That's backlog ticket 06 (inconsistent validation) + ticket 18 (missing max-length) —
+  // both are folded into the Phase 3 route port. When that lands, THIS test is expected to
+  // start failing (a 100-char cap will start rejecting it), and that failure is the signal
+  // the fix landed correctly — not a regression to chase.
+  it("[current behavior, no max-length — see ticket 18] accepts an arbitrarily long name", async () => {
+    const session = await createSession();
+    const { status, body } = await api(`/api/sessions/${session.id}/participants`, {
+      method: "POST",
+      body: JSON.stringify({ name: "x".repeat(500) }),
+    });
+    expect(status).toBe(201);
+    expect(body.name).toHaveLength(500);
+  });
+});
+
+describe("PATCH /api/sessions/:sessionId/participants/:participantId", () => {
+  it("sets a GCASH payment method", async () => {
+    const session = await createSession();
+    const participant = session.participants[0];
+
+    const { status, body } = await api(
+      `/api/sessions/${session.id}/participants/${participant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ payment_method_type: "GCASH", payment_details: "09171234567" }),
+      },
+    );
+
+    expect(status).toBe(200);
+    expect(body.payment_method_type).toBe("GCASH");
+    expect(body.payment_details).toBe("09171234567");
+  });
+
+  it("sets a BANK_TRANSFER payment method, stored as 'Bank Name - Account Number'", async () => {
+    // Encoding owned by frontend/lib/paymentDetails.ts — the route itself just stores
+    // whatever string it's given, so this pins the contract the frontend depends on.
+    const session = await createSession();
+    const participant = session.participants[0];
+
+    const { body } = await api(
+      `/api/sessions/${session.id}/participants/${participant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ payment_method_type: "BANK_TRANSFER", payment_details: "BPI - 1234567890" }),
+      },
+    );
+
+    expect(body.payment_details).toBe("BPI - 1234567890");
+  });
+
+  it("returns 404 when the participant doesn't belong to this session", async () => {
+    // Two different sessions — confirms the lookup is scoped by session_id, not just participant id
+    const sessionA = await createSession();
+    const sessionB = await createSession();
+    const participantFromB = sessionB.participants[0];
+
+    const { status } = await api(
+      `/api/sessions/${sessionA.id}/participants/${participantFromB.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ payment_method_type: "GCASH", payment_details: "0917" }),
+      },
+    );
+
+    expect(status).toBe(404);
+  });
+
+  it("rejects a payment_method_type outside the enum", async () => {
+    const session = await createSession();
+    const participant = session.participants[0];
+
+    const { status } = await api(
+      `/api/sessions/${session.id}/participants/${participant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ payment_method_type: "PAYPAL", payment_details: "x" }),
+      },
+    );
+
+    expect(status).toBe(400);
+  });
+
+  it("rejects empty payment_details", async () => {
+    const session = await createSession();
+    const participant = session.participants[0];
+
+    const { status } = await api(
+      `/api/sessions/${session.id}/participants/${participant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ payment_method_type: "GCASH", payment_details: "" }),
+      },
+    );
+
+    expect(status).toBe(400);
+  });
+
+  // BASELINE, NOT A SPEC — same gap as the POST test above: no max-length on payment_details.
+  // Expected to start failing once ticket 18 lands in Phase 3.
+  it("[current behavior, no max-length — see ticket 18] accepts arbitrarily long payment_details", async () => {
+    const session = await createSession();
+    const participant = session.participants[0];
+
+    const { status, body } = await api(
+      `/api/sessions/${session.id}/participants/${participant.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ payment_method_type: "GCASH", payment_details: "9".repeat(1000) }),
+      },
+    );
+
+    expect(status).toBe(200);
+    expect(body.payment_details).toHaveLength(1000);
+  });
+});
+
+// Small helper: create a session with N participants named P0..P{n-1}, return session + ids in order.
+// Expense tests care about *which* participant owes what, so having stable, predictable ids
+// to reference (session.participants[0].id, etc.) keeps each test's assertions readable.
+async function createSessionWithParticipants(count: number) {
+  const names = Array.from({ length: count }, (_, i) => `P${i}`);
+  return createSession("Expense test session", names);
+}
+
+describe("POST /api/sessions/:sessionId/expenses — EVEN split", () => {
+  it("splits evenly across the chosen participants and returns 201", async () => {
+    const session = await createSessionWithParticipants(3);
+    const [a, b, c] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Dinner",
+        amount: 300,
+        paid_by: a.id,
+        split_type: "EVEN",
+        participant_ids: [a.id, b.id, c.id],
+      }),
+    });
+
+    expect(status).toBe(201);
+    expect(body.description).toBe("Dinner");
+    expect(body.split_type).toBe("EVEN");
+    // serializeExpense only fills in quantity for QUANTITY splits — EVEN/CUSTOM should be null
+    expect(body.quantity).toBeNull();
+    // 300 / 3 participants — divides evenly, so no remainder-pushing kicks in here
+    const amounts = body.splits.map((s: any) => s.amount_owed).sort((x: number, y: number) => x - y);
+    expect(amounts).toEqual([100, 100, 100]);
+  });
+
+  it("pushes the rounding remainder onto the first participant so the split sums exactly", async () => {
+    // 100 / 3 = 33.333... — per-cent rounding alone would total 99.99, not 100.
+    // buildExpenseSplits() detects that 1-centavo gap and adds it to the first person's share.
+    const session = await createSessionWithParticipants(3);
+    const [a, b, c] = session.participants;
+
+    const { body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Split three ways",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "EVEN",
+        participant_ids: [a.id, b.id, c.id],
+      }),
+    });
+
+    const byParticipant = new Map(body.splits.map((s: any) => [s.participant_id, s.amount_owed]));
+    const total = body.splits.reduce((sum: number, s: any) => sum + s.amount_owed, 0);
+    // The exact distribution (33.34/33.33/33.33) is an implementation detail — what must hold
+    // is that the three shares add up to precisely 100, with no dropped or invented centavo
+    expect(total).toBeCloseTo(100, 2);
+    expect(byParticipant.get(a.id)).toBeCloseTo(33.34, 2);
+    expect(byParticipant.get(b.id)).toBeCloseTo(33.33, 2);
+    expect(byParticipant.get(c.id)).toBeCloseTo(33.33, 2);
+  });
+
+  it("rejects a participant_ids entry not in this session", async () => {
+    const session = await createSessionWithParticipants(2);
+    const outsider = "00000000-0000-4000-8000-000000000000";
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Bad split",
+        amount: 100,
+        paid_by: session.participants[0].id,
+        split_type: "EVEN",
+        participant_ids: [session.participants[0].id, outsider],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("participant_ids must all belong to this session");
+  });
+
+  it("rejects a duplicate participant_ids entry", async () => {
+    // A repeated id would double-charge that person and inflate the even-share denominator
+    const session = await createSessionWithParticipants(2);
+    const [a] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Duplicate",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "EVEN",
+        participant_ids: [a.id, a.id],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("participant_ids must not contain duplicates");
+  });
+
+  it("rejects paid_by that isn't a participant in this session", async () => {
+    const session = await createSessionWithParticipants(2);
+    const outsider = "00000000-0000-4000-8000-000000000000";
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Bad payer",
+        amount: 100,
+        paid_by: outsider,
+        split_type: "EVEN",
+        participant_ids: [session.participants[0].id],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("paid_by must be a participant in this session");
+  });
+});
+
+describe("POST /api/sessions/:sessionId/expenses — CUSTOM split", () => {
+  it("accepts hand-entered amounts that sum exactly to the total", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Custom split",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "CUSTOM",
+        splits: [
+          { participant_id: a.id, amount_owed: 60 },
+          { participant_id: b.id, amount_owed: 40 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(201);
+    // serializeExpense only fills in quantity for QUANTITY splits
+    expect(body.quantity).toBeNull();
+    const byParticipant = new Map(body.splits.map((s: any) => [s.participant_id, s.amount_owed]));
+    expect(byParticipant.get(a.id)).toBe(60);
+    expect(byParticipant.get(b.id)).toBe(40);
+  });
+
+  it("accepts amounts within half a centavo of the total (RECONCILED_EPSILON)", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Tiny float noise",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "CUSTOM",
+        splits: [
+          { participant_id: a.id, amount_owed: 60.003 },
+          { participant_id: b.id, amount_owed: 39.999 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(201);
+  });
+
+  it("rejects amounts that don't sum to the expense total", async () => {
+    // Tightened during the hardening pass: CUSTOM splits are hand-entered by a user, so a
+    // real mismatch (unlike EVEN/QUANTITY's system-computed rounding) should be rejected
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Off by a peso",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "CUSTOM",
+        splits: [
+          { participant_id: a.id, amount_owed: 60 },
+          { participant_id: b.id, amount_owed: 39 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("splits must sum to the expense amount");
+  });
+
+  it("rejects a duplicate participant_id across splits", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Duplicate custom",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "CUSTOM",
+        splits: [
+          { participant_id: a.id, amount_owed: 50 },
+          { participant_id: a.id, amount_owed: 50 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("splits must not contain duplicate participant_ids");
+  });
+
+  it("rejects a splits entry whose participant_id isn't in this session", async () => {
+    // Mirrors EVEN's "participant_ids must all belong to this session" guard, but CUSTOM
+    // validates it as "each split needs a valid participant_id..." — a separate code path
+    // (sessions.ts buildExpenseSplits, CUSTOM branch) that had no coverage until now
+    const session = await createSessionWithParticipants(2);
+    const [a] = session.participants;
+    const outsider = "00000000-0000-4000-8000-000000000000";
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Foreign split",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "CUSTOM",
+        splits: [
+          { participant_id: a.id, amount_owed: 50 },
+          { participant_id: outsider, amount_owed: 50 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("each split needs a valid participant_id and a positive amount_owed");
+  });
+});
+
+describe("POST /api/sessions/:sessionId/expenses — QUANTITY split", () => {
+  it("computes each person's share from units consumed", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "6 shots",
+        amount: 60,
+        paid_by: a.id,
+        split_type: "QUANTITY",
+        quantity: 6,
+        splits: [
+          { participant_id: a.id, units: 2 },
+          { participant_id: b.id, units: 4 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(201);
+    expect(body.quantity).toBe(6);
+    const byParticipant = new Map(body.splits.map((s: any) => [s.participant_id, s.amount_owed]));
+    // Unit price is 60/6 = 10 — a clean division, no remainder-push needed for this assertion
+    expect(byParticipant.get(a.id)).toBe(20);
+    expect(byParticipant.get(b.id)).toBe(40);
+  });
+
+  it("rejects units that don't add up to the declared quantity", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Mismatched units",
+        amount: 60,
+        paid_by: a.id,
+        split_type: "QUANTITY",
+        quantity: 6,
+        splits: [
+          { participant_id: a.id, units: 2 },
+          { participant_id: b.id, units: 3 }, // 2 + 3 = 5, not 6
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("units add up to 5, but quantity is 6");
+  });
+
+  it("rejects a duplicate participant_id across QUANTITY splits", async () => {
+    // Same guard shape as CUSTOM's duplicate check, but QUANTITY has its own separate
+    // code path (buildExpenseSplits' QUANTITY branch) that had no coverage until now
+    const session = await createSessionWithParticipants(2);
+    const [a] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Duplicate quantity",
+        amount: 60,
+        paid_by: a.id,
+        split_type: "QUANTITY",
+        quantity: 6,
+        splits: [
+          { participant_id: a.id, units: 3 },
+          { participant_id: a.id, units: 3 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("splits must not contain duplicate participant_ids");
+  });
+
+  it("rejects a splits entry whose participant_id isn't in this session", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a] = session.participants;
+    const outsider = "00000000-0000-4000-8000-000000000000";
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Foreign quantity",
+        amount: 60,
+        paid_by: a.id,
+        split_type: "QUANTITY",
+        quantity: 6,
+        splits: [
+          { participant_id: a.id, units: 3 },
+          { participant_id: outsider, units: 3 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("each split needs a valid participant_id and a positive whole number of units");
+  });
+});
+
+describe("PATCH /api/sessions/:sessionId/expenses/:expenseId — edit in place", () => {
+  async function createEvenExpense(session: any) {
+    const [a, b] = session.participants;
+    const { body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Original",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "EVEN",
+        participant_ids: [a.id, b.id],
+      }),
+    });
+    return body;
+  }
+
+  it("replaces the expense's fields and rebuilds its splits", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+    const expense = await createEvenExpense(session);
+
+    const { status, body } = await api(
+      `/api/sessions/${session.id}/expenses/${expense.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          description: "Corrected",
+          amount: 100,
+          paid_by: a.id,
+          split_type: "CUSTOM",
+          splits: [
+            { participant_id: a.id, amount_owed: 70 },
+            { participant_id: b.id, amount_owed: 30 },
+          ],
+        }),
+      },
+    );
+
+    expect(status).toBe(200);
+    expect(body.description).toBe("Corrected");
+    expect(body.split_type).toBe("CUSTOM");
+    // The route deletes the old ExpenseSplit rows and creates new ones — confirm the old
+    // EVEN 50/50 split is gone, not just that a new CUSTOM split was appended alongside it
+    expect(body.splits).toHaveLength(2);
+    const byParticipant = new Map(body.splits.map((s: any) => [s.participant_id, s.amount_owed]));
+    expect(byParticipant.get(a.id)).toBe(70);
+    expect(byParticipant.get(b.id)).toBe(30);
+  });
+
+  it("returns 404 when the expense doesn't belong to this session", async () => {
+    const sessionA = await createSessionWithParticipants(2);
+    const sessionB = await createSessionWithParticipants(2);
+    const expenseFromB = await createEvenExpense(sessionB);
+
+    const { status } = await api(
+      `/api/sessions/${sessionA.id}/expenses/${expenseFromB.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          description: "Hijack attempt",
+          amount: 50,
+          paid_by: sessionA.participants[0].id,
+          split_type: "EVEN",
+          participant_ids: [sessionA.participants[0].id],
+        }),
+      },
+    );
+
+    expect(status).toBe(404);
+  });
+
+  it("returns 404 for a well-formed but nonexistent expense id", async () => {
+    const session = await createSessionWithParticipants(2);
+    const { status } = await api(
+      `/api/sessions/${session.id}/expenses/00000000-0000-4000-8000-000000000000`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          description: "Ghost",
+          amount: 50,
+          paid_by: session.participants[0].id,
+          split_type: "EVEN",
+          participant_ids: [session.participants[0].id],
+        }),
+      },
+    );
+    expect(status).toBe(404);
+  });
+
+  it("never 500s when a delete lands concurrently with an edit (ticket 15 regression)", async () => {
+    // Ticket 15 (.scratch/v1-hardening-audit/issues/15-edit-route-toctou-500-instead-of-404.md):
+    // this route's existence check and its $transaction aren't atomic with each other, so a
+    // concurrent DELETE landing in between used to turn a clean 404 into an unhandled 500
+    // (Prisma throws P2025 when the transaction's expense.update targets a row that's gone).
+    // Fixed by catching P2025 and returning the same 404 every other route uses.
+    //
+    // That ticket's own resolution notes record that forcing the *exact* race window over HTTP
+    // isn't reliably reproducible without injecting an artificial delay into the route itself
+    // (deliberately not done, here or there). So rather than pinning one specific winner, this
+    // fires both requests concurrently and asserts the invariant the fix actually guarantees:
+    // whichever request loses the race gets a clean 404, never a raw 500 — on whichever way
+    // the timing happens to land for a given run.
+    const session = await createSessionWithParticipants(2);
+    const expense = await createEvenExpense(session);
+
+    const [patchResult, deleteResult] = await Promise.all([
+      api(`/api/sessions/${session.id}/expenses/${expense.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          description: "Concurrent edit",
+          amount: 100,
+          paid_by: session.participants[0].id,
+          split_type: "EVEN",
+          participant_ids: [session.participants[0].id, session.participants[1].id],
+        }),
+      }),
+      api(`/api/sessions/${session.id}/expenses/${expense.id}`, { method: "DELETE" }),
+    ]);
+
+    // The one thing that must never happen, regardless of interleaving
+    expect(patchResult.status).not.toBe(500);
+    expect(deleteResult.status).not.toBe(500);
+    // PATCH either wins the race (200) or loses cleanly (404 — either from the early existence
+    // check if DELETE fully completed first, or from the P2025 catch if DELETE's own delete
+    // call landed mid-transaction; both are valid outcomes a black-box HTTP test can't and
+    // shouldn't try to tell apart)
+    expect([200, 404]).toContain(patchResult.status);
+    // DELETE's own findFirst+delete never depend on PATCH completing — PATCH only rewrites
+    // ExpenseSplit rows and Expense fields, it never removes the Expense row itself — so
+    // DELETE succeeds regardless of which way the race lands
+    expect(deleteResult.status).toBe(204);
+  });
+});
+
+describe("PATCH /api/sessions/:sessionId/expenses — bulk reorder", () => {
+  it("reassigns sort_order to match the supplied id order", async () => {
+    const session = await createSessionWithParticipants(1);
+    const payer = session.participants[0];
+
+    // Create three expenses; they'll come back in creation order (1, 2, 3) before reordering
+    const one = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "One", amount: 10, paid_by: payer.id, split_type: "EVEN", participant_ids: [payer.id] }),
+    });
+    const two = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "Two", amount: 10, paid_by: payer.id, split_type: "EVEN", participant_ids: [payer.id] }),
+    });
+    const three = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "Three", amount: 10, paid_by: payer.id, split_type: "EVEN", participant_ids: [payer.id] }),
+    });
+
+    // Reverse the order: Three, One, Two
+    const newOrder = [three.body.id, one.body.id, two.body.id];
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "PATCH",
+      body: JSON.stringify({ expense_ids: newOrder }),
+    });
+
+    expect(status).toBe(200);
+    expect(body.map((e: any) => e.id)).toEqual(newOrder);
+  });
+
+  it("rejects a partial id list that omits an existing expense", async () => {
+    const session = await createSessionWithParticipants(1);
+    const payer = session.participants[0];
+
+    const one = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "One", amount: 10, paid_by: payer.id, split_type: "EVEN", participant_ids: [payer.id] }),
+    });
+    await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "Two", amount: 10, paid_by: payer.id, split_type: "EVEN", participant_ids: [payer.id] }),
+    });
+
+    // Omits "Two" entirely — a partial list would silently strand it at its old sort_order
+    const { status } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "PATCH",
+      body: JSON.stringify({ expense_ids: [one.body.id] }),
+    });
+
+    expect(status).toBe(400);
+  });
+
+  it("rejects an id from another session mixed into the list", async () => {
+    const session = await createSessionWithParticipants(1);
+    const otherSession = await createSessionWithParticipants(1);
+    const payer = session.participants[0];
+
+    const one = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "One", amount: 10, paid_by: payer.id, split_type: "EVEN", participant_ids: [payer.id] }),
+    });
+    // Its id is never referenced below — it only needs to exist so session's real expense
+    // count is 2, matching the length of the (invalid) list we're about to send
+    await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "Two", amount: 10, paid_by: payer.id, split_type: "EVEN", participant_ids: [payer.id] }),
+    });
+    const foreign = await api(`/api/sessions/${otherSession.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "Foreign", amount: 10, paid_by: otherSession.participants[0].id, split_type: "EVEN", participant_ids: [otherSession.participants[0].id] }),
+    });
+
+    // Right length (2, matching session's real expense count), but swaps out "two" for an id
+    // belonging to otherSession — isolates the "every id must belong to this session" check
+    // specifically, rather than incidentally failing on list length/completeness instead
+    const { status } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "PATCH",
+      body: JSON.stringify({ expense_ids: [one.body.id, foreign.body.id] }),
+    });
+
+    expect(status).toBe(400);
+  });
+});
+
+describe("DELETE /api/sessions/:sessionId/expenses/:expenseId", () => {
+  it("deletes the expense and returns 204", async () => {
+    const session = await createSessionWithParticipants(1);
+    const payer = session.participants[0];
+    const created = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "To delete", amount: 10, paid_by: payer.id, split_type: "EVEN", participant_ids: [payer.id] }),
+    });
+
+    const del = await api(`/api/sessions/${session.id}/expenses/${created.body.id}`, { method: "DELETE" });
+    expect(del.status).toBe(204);
+
+    // Confirm it's actually gone, not just that DELETE returned success
+    const after = await api(`/api/sessions/${session.id}`);
+    expect(after.body.expenses.find((e: any) => e.id === created.body.id)).toBeUndefined();
+  });
+
+  it("cascades: the expense's splits are gone too, not just orphaned", async () => {
+    // ExpenseSplit has onDelete: Cascade — this proves that config actually works end to end,
+    // not just that it's declared in schema.prisma
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+    const created = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "Shared", amount: 20, paid_by: a.id, split_type: "EVEN", participant_ids: [a.id, b.id] }),
+    });
+
+    await api(`/api/sessions/${session.id}/expenses/${created.body.id}`, { method: "DELETE" });
+
+    // If splits survived as orphans, a fresh GET would still show a nonzero balance for b
+    const settlements = await api(`/api/sessions/${session.id}/settlements`);
+    expect(settlements.body.settlements).toEqual([]);
+  });
+
+  it("returns 404 when the expense doesn't belong to this session", async () => {
+    const sessionA = await createSessionWithParticipants(1);
+    const sessionB = await createSessionWithParticipants(1);
+    const expenseFromB = await api(`/api/sessions/${sessionB.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "B's expense", amount: 10, paid_by: sessionB.participants[0].id, split_type: "EVEN", participant_ids: [sessionB.participants[0].id] }),
+    });
+
+    const { status } = await api(`/api/sessions/${sessionA.id}/expenses/${expenseFromB.body.id}`, { method: "DELETE" });
+    expect(status).toBe(404);
+  });
+});
+
+// Shared setup for the settlement tests below: a session where A paid 100, split evenly with B,
+// so B owes A 50 and A owes nothing. Every settlement test starts from this same known state.
+async function createSessionWithADebt() {
+  const session = await createSessionWithParticipants(2);
+  const [a, b] = session.participants;
+  await api(`/api/sessions/${session.id}/expenses`, {
+    method: "POST",
+    body: JSON.stringify({ description: "Dinner", amount: 100, paid_by: a.id, split_type: "EVEN", participant_ids: [a.id, b.id] }),
+  });
+  return { session, a, b };
+}
+
+describe("GET /api/sessions/:sessionId/settlements — live preview", () => {
+  it("returns an unsaved preview when no plan has been frozen yet", async () => {
+    const { session, a, b } = await createSessionWithADebt();
+
+    const { status, body } = await api(`/api/sessions/${session.id}/settlements`);
+
+    expect(status).toBe(200);
+    expect(body.frozen).toBe(false);
+    expect(body.stale).toBe(false);
+    expect(body.settlements).toEqual([
+      { from_id: b.id, from_name: "P1", to_id: a.id, to_name: "P0", amount: 50 },
+    ]);
+  });
+
+  it("returns an empty plan for a session with no expenses", async () => {
+    const session = await createSessionWithParticipants(2);
+    const { body } = await api(`/api/sessions/${session.id}/settlements`);
+    expect(body.settlements).toEqual([]);
+  });
+
+  it("recomputes on every call rather than persisting anything", async () => {
+    // Calling GET twice in a row must not itself freeze the plan — only POST does that
+    const { session } = await createSessionWithADebt();
+    await api(`/api/sessions/${session.id}/settlements`);
+    const { body } = await api(`/api/sessions/${session.id}/settlements`);
+    expect(body.frozen).toBe(false);
+  });
+});
+
+describe("POST /api/sessions/:sessionId/settlements — freeze the plan", () => {
+  it("persists the plan and returns it with paid: false on every row", async () => {
+    const { session, a, b } = await createSessionWithADebt();
+
+    const { status, body } = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    expect(status).toBe(201);
+    expect(body.frozen).toBe(true);
+    expect(body.settlements).toHaveLength(1);
+    expect(body.settlements[0]).toMatchObject({ from_id: b.id, to_id: a.id, amount: 50, paid: false });
+    // Freezing assigns each row its own persistent id — needed for the later PATCH-by-id call
+    expect(body.settlements[0].id).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
+  it("a subsequent GET returns the same frozen rows, not a fresh computation", async () => {
+    const { session } = await createSessionWithADebt();
+    const frozen = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    const { body } = await api(`/api/sessions/${session.id}/settlements`);
+
+    expect(body.frozen).toBe(true);
+    expect(body.settlements[0].id).toBe(frozen.body.settlements[0].id);
+  });
+
+  it("re-POSTing (recalculate) replaces the old plan and resets paid flags", async () => {
+    const { session, a, b } = await createSessionWithADebt();
+    const first = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    // Mark the original settlement paid, then add a new expense that changes the balances
+    await api(`/api/sessions/${session.id}/settlements/${first.body.settlements[0].id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ paid: true }),
+    });
+    await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "Extra", amount: 20, paid_by: b.id, split_type: "EVEN", participant_ids: [a.id, b.id] }),
+    });
+
+    // Recalculate: dinner made A +50/B -50; the extra (paid by B, split evenly) makes B +10/A -10.
+    // Net: A +40, B -40 — B still owes A, just 40 instead of 50, a different amount on the same plan.
+    const second = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    expect(second.body.settlements).toHaveLength(1);
+    expect(second.body.settlements[0]).toMatchObject({ from_id: b.id, to_id: a.id, amount: 40, paid: false });
+    // A fresh row, not the old one flipped back to unpaid
+    expect(second.body.settlements[0].id).not.toBe(first.body.settlements[0].id);
+  });
+
+  it("returns an empty settlements array when balances already net to zero", async () => {
+    const session = await createSessionWithParticipants(2);
+    const { body } = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+    expect(body.settlements).toEqual([]);
+  });
+});
+
+describe("GET /api/sessions/:sessionId/settlements — stale detection", () => {
+  it("flags stale: true when expenses change after the plan was frozen", async () => {
+    const { session, a, b } = await createSessionWithADebt();
+    await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    // Add an expense after freezing — the frozen rows no longer match the live math
+    await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({ description: "Late addition", amount: 20, paid_by: a.id, split_type: "EVEN", participant_ids: [a.id, b.id] }),
+    });
+
+    const { body } = await api(`/api/sessions/${session.id}/settlements`);
+
+    expect(body.frozen).toBe(true);
+    expect(body.stale).toBe(true);
+    // Stale still returns the OLD frozen amount (50), not the new live one — the plan is
+    // only flagged as outdated, never silently replaced by a GET
+    expect(body.settlements[0].amount).toBe(50);
+  });
+
+  it("stays fresh (stale: false) when nothing has changed since freezing", async () => {
+    const { session } = await createSessionWithADebt();
+    await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    const { body } = await api(`/api/sessions/${session.id}/settlements`);
+
+    expect(body.stale).toBe(false);
+  });
+});
+
+describe("PATCH /api/sessions/:sessionId/settlements/:settlementId — mark paid", () => {
+  it("flips a frozen settlement's paid flag to true", async () => {
+    const { session } = await createSessionWithADebt();
+    const frozen = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+    const settlementId = frozen.body.settlements[0].id;
+
+    const { status, body } = await api(
+      `/api/sessions/${session.id}/settlements/${settlementId}`,
+      { method: "PATCH", body: JSON.stringify({ paid: true }) },
+    );
+
+    expect(status).toBe(200);
+    expect(body.paid).toBe(true);
+  });
+
+  it("flips it back to unpaid", async () => {
+    const { session } = await createSessionWithADebt();
+    const frozen = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+    const settlementId = frozen.body.settlements[0].id;
+
+    await api(`/api/sessions/${session.id}/settlements/${settlementId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ paid: true }),
+    });
+    const { body } = await api(`/api/sessions/${session.id}/settlements/${settlementId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ paid: false }),
+    });
+
+    expect(body.paid).toBe(false);
+  });
+
+  it("returns 404 when the settlement doesn't belong to this session", async () => {
+    const { session: sessionA } = await createSessionWithADebt();
+    const { session: sessionB } = await createSessionWithADebt();
+    const frozenB = await api(`/api/sessions/${sessionB.id}/settlements`, { method: "POST" });
+
+    const { status } = await api(
+      `/api/sessions/${sessionA.id}/settlements/${frozenB.body.settlements[0].id}`,
+      { method: "PATCH", body: JSON.stringify({ paid: true }) },
+    );
+
+    expect(status).toBe(404);
+  });
+
+  it("rejects a non-boolean paid value", async () => {
+    const { session } = await createSessionWithADebt();
+    const frozen = await api(`/api/sessions/${session.id}/settlements`, { method: "POST" });
+
+    const { status } = await api(
+      `/api/sessions/${session.id}/settlements/${frozen.body.settlements[0].id}`,
+      { method: "PATCH", body: JSON.stringify({ paid: "yes" }) },
+    );
+
+    expect(status).toBe(400);
+  });
+});

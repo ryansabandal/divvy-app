@@ -126,11 +126,9 @@ enum PaymentMethodType {
 
 ## V1 Features (Strict Scope)
 
-> **Status:** V1 is **feature-complete, deployed, and formally closed** (hardening pass completed 2026-07-19 — a full-repo audit plus every fix it produced). See [README.md](README.md#roadmap--next-steps) for exactly what changed.
+> **Status:** V1 is **feature-complete, deployed, and formally closed** (hardening pass completed 2026-07-19 — a full-repo audit plus every fix it produced). **Current priority and next steps always live in [README.md](README.md#roadmap--next-steps), not here** — this file is the spec and goes stale fast if status is duplicated into it.
 >
-> **Next up:** no single blocking item. Either groom the backlog filed at `.scratch/v1-hardening-audit/issues/` (20 lower-priority items — DRY/typing/a11y cleanups, rate limiting, etc.; tickets 14/15 are separate, already resolved), or start V2 planning (QR Ph upload, receipt OCR, proof-of-payment — all gated on adding file-storage infra).
->
-> **Post-close addition (2026-07-19):** edit-in-place and drag-and-drop reorder for expenses — see below. Neither needs file-storage infra, so unlike the V2 trio they weren't held for that gate; added as a direct quality improvement on an existing V1 feature instead.
+> **Post-close additions (2026-07-19):** edit-in-place + drag-and-drop reorder for expenses, and per-person charge breakdown (both below) — neither needed file-storage infra, so unlike the V2 trio they weren't held for that gate; added as direct quality improvements on an already-closed V1.
 
 - [x] Create a session (name the bill, add participants)
 - [x] Add expenses (who paid, how much, description)
@@ -208,8 +206,10 @@ All routes live in `backend/src/routes/sessions.ts` (see the Project Structure s
 | Service | Purpose              | Cost      |
 | ------- | -------------------- | --------- |
 | Vercel  | Next.js frontend     | Free      |
-| Railway | Express + PostgreSQL | Free tier |
+| Railway | Express + PostgreSQL | Paid (Hobby plan — Railway retired its free tier) |
 | GitHub  | Source control       | Free      |
+
+**Note:** this table reflects what `main` deploys today. A migration is in progress on `develop` — current status lives in [README.md](README.md#roadmap--next-steps), not here.
 
 **Gotcha:** `NEXT_PUBLIC_API_URL` (set in Vercel's project environment variables) must include the `https://` scheme. Without it, the browser resolves the value as a relative path off the frontend's own origin instead of an absolute URL to the Railway backend — requests 404 against Vercel itself, and the frontend's `JSON.parse` of that 404 HTML page throws `SyntaxError: unexpected character at line 1 column 1`.
 

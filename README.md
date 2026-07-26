@@ -378,7 +378,38 @@ frontend/
 
 ## Roadmap / next steps
 
-V1 is feature-complete, deployed, and **formally closed** (2026-07-19) — the hardening pass below is done, and there's no single blocking item for next session.
+V1 is feature-complete, deployed, and **formally closed** (2026-07-19) — the hardening pass below is done. **Top priority for next session is the serverless migration below** — everything else in this section is historical.
+
+### Serverless migration (in progress, started 2026-07-26 — TOP PRIORITY for next session)
+
+**Work happens on the `develop` branch.** `main` still deploys Frontend→Vercel / Backend+DB→Railway untouched — nothing here is live yet.
+
+**Why:** eliminate the recurring Railway subscription. Installability (PWA or native iOS) was considered first and rejected for this purpose — a PWA or a native app is still just a client calling the same Railway API, so neither removes the hosting cost. Full reasoning is in the conversation history, not repeated here.
+
+**Target architecture:** one Next.js app on Vercel (routes become Route Handlers, `backend/` dissolves) + Supabase Postgres (chosen over Neon specifically because Supabase Storage unblocks the whole V2 trio — QR Ph, receipt OCR, proof-of-payment — that's currently gated on "no file-storage infra"). Local dev is unaffected: `compose.yml` Postgres under Podman stays exactly as-is; no Supabase CLI (it needs Docker, which conflicts with the Podman-only principle).
+
+**Phases:**
+
+0. ✅ **Done** — HTTP-level integration tests for all 11 routes (`backend/src/routes/sessions.integration.test.ts`, `npm run test:integration`, 60 tests, all passing against the current Express app on `:4000`). Deliberately written against a configurable `TEST_BASE_URL` rather than `supertest`-wrapping the Express app directly, so the identical file becomes the parity proof once the same suite runs clean against Next.js on `:3000`. Two tests are intentionally marked `[current behavior, no max-length — see ticket 18]` — they pin today's gap and are *expected* to start failing once ticket 18's fix lands in Phase 3; that flip is the signal the fix worked, not a regression.
+1. **Supabase setup + data migration** — provision Supabase Postgres, `pg_dump` from Railway → restore (chosen over starting fresh, since shared session links are permanent and a 404 for someone still holding one is a real harm). Two connection strings needed: pooled (PgBouncer) for the running app, direct for Prisma CLI migrations.
+2. **Repo restructure** — `backend/` dissolves into the single Next.js app. `settle.ts` and its 8 unit tests move untouched behind a `lib/` boundary. `git mv` to preserve file history.
+3. **Port the 11 routes** to Next.js Route Handlers, folding in 9 backlog tickets whose fixes are absorbed by the rewrite (see disposition below). The Express `sessionsRouter.param("sessionId", ...)` UUID gate and the 4-argument error handler have no Route Handler equivalent — those need a redesigned shared wrapper, which is the one genuine design task in this phase. **Run the Phase 0 suite against `:3000` when done — green on both `:4000` and `:3000` is the parity proof.**
+4. **Deploy** — Vercel env vars (pooled + direct Supabase URLs), a **required** weekly GitHub Actions keepalive hitting a trivial endpoint (prevents Supabase's 7-day inactivity pause — not optional), then decommission Railway.
+5. **Post-migration tickets** — 01 (rate limiting: needs a serverless-compatible approach, `express-rate-limit` won't work) and 12 (`noUncheckedIndexedAccess`: one tsconfig instead of two).
+
+**Backlog ticket disposition** (of the 20 open tickets under `.scratch/v1-hardening-audit/issues/`, 14/15 already resolved separately):
+
+| Fate | Tickets | Why |
+| --- | --- | --- |
+| Deleted outright | 08 | Single origin → no CORS config exists to move to an env var |
+| Absorbed by Phase 3 | 02, 06, 10, 16, 17, 18, 19, 20, 21 | All are "a route is wrong somehow," and all 11 routes are being rewritten anyway |
+| Free during Phases 1–2 | 03, 13 | Single app makes shared types trivial; fresh migrations make the cascade fix free |
+| Phase 5 (after deploy) | 01, 12 | Both change shape under serverless/single-tsconfig |
+| Untouched — pure frontend | 04, 05, 07, 09, 11, 22 | Migration doesn't come near them; revisit whenever |
+
+**Safety net:** Phase 0's tests are what make folding 9 ticket fixes into a full 11-route rewrite safe rather than reckless — without them, a regression from the port and a regression from a ticket fix would be indistinguishable.
+
+**Code review timing for this migration specifically** (general policy is in [CLAUDE.md](CLAUDE.md#engineering-principles)): review after Phase 0 (highest value — wrong tests poison every later phase), after Phase 3 (the 9 folded-in ticket fixes are deliberate behavior changes the parity tests won't catch, since they're *supposed* to differ), and after Phase 4 (security lens on env vars and the pooled/direct connection split). Skip reviewing Phases 1–2 — they're verified by "does the data match" / "does it build," not by reading code.
 
 ### Hardening (complete — 2026-07-19)
 
