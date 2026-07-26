@@ -8,6 +8,6 @@ Category: Correctness
 
 Not exercised today: no route deletes a Session (see API routes — only expenses are deletable). Surfaced while drawing the ER diagram in the README, not from a reported bug.
 
-Location: backend/prisma/schema.prisma:72-83 (Settlement model, all three relations)
+Location: prisma/schema.prisma (Settlement model, all three relations)
 
 Fix sketch: add `onDelete: Cascade` to Settlement's `session` relation (and consider `Participant`'s `expenses`/`splits`/`owes`/`owed` relations too, same gap) — but only once a session-delete route actually exists. No fix needed while the gap is unreachable.

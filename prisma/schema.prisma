@@ -1,4 +1,4 @@
-// Tells Prisma to generate a TypeScript client for use in our Express app
+// Tells Prisma to generate a TypeScript client for use in the app
 generator client {
   provider = "prisma-client-js"
 }

@@ -8,44 +8,54 @@ This file is the spec (what to build). See [README.md](README.md) for current bu
 
 ## Stack
 
-- **Frontend:** Next.js (React) — deployed on Vercel
-- **Backend:** Node.js + Express — deployed on Railway
-- **Database:** PostgreSQL — hosted on Railway
-- **ORM:** Prisma
+- **Framework:** Next.js (React) — App Router, Route Handlers for the API — deployed on Vercel
+- **Database:** PostgreSQL — hosted on Supabase
+- **ORM:** Prisma (driver-adapter mode via `@prisma/adapter-pg`)
 - **Language:** TypeScript throughout
+
+A single Next.js app; there is no separate backend service. Route Handlers under `app/api/**` are the API — see [README.md](README.md) for why (the July 2026 serverless migration off Railway/Express).
 
 ## Project Structure
 
 ```
-divvy/
-├── frontend/
-│   ├── app/
-│   │   ├── page.tsx                          # Create session + "Your recent sessions" list
-│   │   ├── [sessionId]/page.tsx              # Session view (edit)
-│   │   ├── [sessionId]/settle/page.tsx       # Settlement screen
-│   │   └── [sessionId]/view/page.tsx         # Read-only participant view
-│   ├── lib/
-│   │   ├── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
-│   │   ├── paymentDetails.ts                 # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
-│   │   ├── apiUrl.ts                         # apiUrl(path) — builds an absolute backend URL from NEXT_PUBLIC_API_URL
-│   │   ├── fetcher.ts                        # shared SWR fetcher (generic error message parameterized per page)
-│   │   └── expenseBreakdown.ts               # buildParticipantBreakdown() — what one person is charged for; pure, no React
-│   └── components/
-│       └── ExpenseBreakdown.tsx              # collapsible per-person charge list, shared by the settle + view pages
-├── backend/
-│   ├── src/
-│   │   ├── index.ts                          # Express app entrypoint
-│   │   ├── db.ts                             # Shared PrismaClient instance
-│   │   ├── routes/
-│   │   │   └── sessions.ts                   # All /api/sessions/* routes — participants, expenses, and settlements are session-scoped, no independent top-level routes
-│   │   ├── schemas/
-│   │   │   └── sessions.ts                   # Zod schemas for request body validation
-│   │   └── lib/
-│   │       ├── settle.ts                     # Debt simplification algorithm
-│   │       └── settle.test.ts                # Vitest unit tests, incl. regression coverage for the residual-cent fix
-│   ├── prisma/
-│   │   └── schema.prisma
-│   └── prisma.config.ts                      # DB connection for the Prisma CLI
+divvy-app/
+├── app/
+│   ├── page.tsx                              # Create session + "Your recent sessions" list
+│   ├── [sessionId]/page.tsx                  # Session view (edit)
+│   ├── [sessionId]/settle/page.tsx           # Settlement screen
+│   ├── [sessionId]/view/page.tsx             # Read-only participant view
+│   └── api/
+│       ├── health/route.ts                   # GET — used by the Supabase keepalive cron
+│       └── sessions/                         # All session-scoped routes; no independent top-level routes
+│           ├── route.ts                      # POST /api/sessions
+│           └── [sessionId]/
+│               ├── route.ts                  # GET /api/sessions/:sessionId
+│               ├── participants/[...]        # POST, PATCH :participantId
+│               ├── expenses/[...]            # POST, PATCH (single + bulk reorder), DELETE
+│               └── settlements/[...]         # GET, POST, PATCH :settlementId
+├── lib/
+│   ├── db.ts                                 # Shared Prisma client (globalThis singleton guard for dev HMR)
+│   ├── recentSessions.ts                     # localStorage helper — remembers visited sessions on this device
+│   ├── paymentDetails.ts                     # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
+│   ├── fetcher.ts                            # shared SWR fetcher (generic error message parameterized per page)
+│   ├── expenseBreakdown.ts                   # buildParticipantBreakdown() — what one person is charged for; pure, no React
+│   ├── expenseSession.ts                     # loadSessionParticipants()/validatePayer() — shared session-fetch + payer-membership check for expense routes
+│   ├── expenseSplits.ts                      # split-building logic for EVEN/CUSTOM/QUANTITY
+│   ├── requestBody.ts                        # parseBody()/parseJsonBody() — shared parse-then-validate-then-400 pipeline for every mutating route
+│   ├── serialize.ts                          # DB row → API response shaping
+│   ├── settlementHelpers.ts                  # shared settlement-plan helpers
+│   ├── settle.ts                             # Debt simplification algorithm
+│   ├── settle.test.ts                        # Vitest unit tests, incl. regression coverage for the residual-cent fix
+│   └── validation.ts                         # requireValidSessionId() and friends
+├── components/
+│   └── ExpenseBreakdown.tsx                  # collapsible per-person charge list, shared by the settle + view pages
+├── schemas/
+│   └── sessions.ts                           # Zod schemas for every request body
+├── prisma/
+│   └── schema.prisma
+├── prisma.config.ts                          # DB connection for the Prisma CLI
+└── tests/
+    └── sessions.integration.test.ts          # HTTP-level parity suite against a running dev server (TEST_BASE_URL)
 ```
 
 ## Data Model
@@ -140,7 +150,7 @@ enum PaymentMethodType {
 - [x] Per-person charge breakdown on the settle + read-only view screens — expand a settlement row to see exactly which expenses the debtor is being charged for, so they can verify their own line items without scrolling the full expense list. Deliberately describes the **person**, not the payment: the plan is a simplified routing of net balances, so a given row often can't be traced to specific line items (the debtor and creditor may never have shared an expense)
 - [x] Display each participant's GCash/Maya number or bank account on the settle screen with a copy button so the payer can initiate the transfer themselves inside the relevant app
 - [x] Shareable read-only session link (`/[sessionId]/view`) — expense breakdown + settlement plan, no edit controls; "Share view link" button on the session page copies the URL to clipboard
-- [x] Return to a past session without login — home page shows a device-local "Your recent sessions" list (`frontend/lib/recentSessions.ts`, backed by `localStorage`, newest-first, capped at 10); "Copy session link" button on the session page for cross-device return (chosen over a raw sessionId copy/paste flow — a 36-char UUID is error-prone to hand-copy and the app already has a better container for it: the URL)
+- [x] Return to a past session without login — home page shows a device-local "Your recent sessions" list (`lib/recentSessions.ts`, backed by `localStorage`, newest-first, capped at 10); "Copy session link" button on the session page for cross-device return (chosen over a raw sessionId copy/paste flow — a 36-char UUID is error-prone to hand-copy and the app already has a better container for it: the URL)
 - [x] Design pass — navy/teal/sky-blue/beige/white palette; sticky navy header with Divvy wordmark; Tailwind v4 with plain CSS component classes (no `@apply` — Turbopack bypasses PostCSS, so `@apply` is never processed)
 
 ## Out of Scope for V1
@@ -164,9 +174,9 @@ Use greedy debt simplification to minimize the number of transactions:
 3. Greedily match largest debtor to largest creditor
 4. Repeat until all balances are zero
 
-This is the standard approach used by Splitwise. Implement in `backend/src/lib/settle.ts`.
+This is the standard approach used by Splitwise. Implement in `lib/settle.ts`.
 
-**Reconciliation tolerance:** balances are compared to zero using `RECONCILED_EPSILON = 0.005` (half a centavo), exported from `settle.ts` and reused by the CUSTOM-split guard in `sessions.ts`. A full-cent threshold (the original value) misclassifies a genuine 1-centavo balance as "already settled" and silently drops it from the plan — found in the 2026-07-19 audit, fixed the same day. Half a centavo is small enough to never swallow a real balance, large enough to absorb floating-point noise from repeated arithmetic on already-rounded amounts.
+**Reconciliation tolerance:** balances are compared to zero using `RECONCILED_EPSILON = 0.005` (half a centavo), exported from `settle.ts` and reused by the CUSTOM-split guard in `lib/expenseSplits.ts`. A full-cent threshold (the original value) misclassifies a genuine 1-centavo balance as "already settled" and silently drops it from the plan — found in the 2026-07-19 audit, fixed the same day. Half a centavo is small enough to never swallow a real balance, large enough to absorb floating-point noise from repeated arithmetic on already-rounded amounts.
 
 ## Payment Display
 
@@ -199,19 +209,17 @@ POST   /api/sessions/:sessionId/settlements                  # Finalize (freeze)
 PATCH  /api/sessions/:sessionId/settlements/:settlementId    # Mark one frozen payment paid or unpaid
 ```
 
-All routes live in `backend/src/routes/sessions.ts` (see the Project Structure section above — participants/expenses/settlements are session-scoped, not split into separate router files).
+All routes live under `app/api/sessions/**` as Next.js Route Handlers (see the Project Structure section above — participants/expenses/settlements are session-scoped, not split into separate top-level routes).
 
 ## Deployment
 
-| Service | Purpose              | Cost      |
-| ------- | -------------------- | --------- |
-| Vercel  | Next.js frontend     | Free      |
-| Railway | Express + PostgreSQL | Paid (Hobby plan — Railway retired its free tier) |
-| GitHub  | Source control       | Free      |
+| Service  | Purpose                    | Cost |
+| -------- | --------------------------- | ---- |
+| Vercel   | Next.js app (frontend + API) | Free |
+| Supabase | PostgreSQL                  | Free |
+| GitHub   | Source control + Actions (weekly Supabase keepalive cron) | Free |
 
-**Note:** this table reflects what `main` deploys today. A migration is in progress on `develop` — current status lives in [README.md](README.md#roadmap--next-steps), not here.
-
-**Gotcha:** `NEXT_PUBLIC_API_URL` (set in Vercel's project environment variables) must include the `https://` scheme. Without it, the browser resolves the value as a relative path off the frontend's own origin instead of an absolute URL to the Railway backend — requests 404 against Vercel itself, and the frontend's `JSON.parse` of that 404 HTML page throws `SyntaxError: unexpected character at line 1 column 1`.
+Everything runs from the repo root — a single Vercel project, no separate backend deploy. `DATABASE_URL` is set per-environment in the Vercel dashboard, pointed at Supabase's pooled (6543, `?pgbouncer=true`) connection string; the direct (5432) string is used only for one-off CLI migrations, never in a deployed environment. See [README.md](README.md) for the full migration history and current architecture.
 
 ## Design Principles
 

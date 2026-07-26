@@ -4,6 +4,6 @@ Category: Best-practice
 
 # tsconfig strictness gap: noUncheckedIndexedAccess off
 
-backend/tsconfig.json has strict: true but not noUncheckedIndexedAccess. Code relies on unchecked index access like splitRows[0].amount_owed (sessions.ts:217,260) and sortedLive[i] (sessions.ts:44-46). Frontend tsconfig likewise lacks it.
+`tsconfig.json` has `strict: true` but not `noUncheckedIndexedAccess`. Code relies on unchecked index access in a few places (e.g. array-index reads in the settlement/split-building helpers under `lib/`). Now a single tsconfig instead of the old two (`backend/`'s + `frontend/`'s), so the fix is simpler than when this ticket was filed.
 
-Fix sketch: enable the flag in both tsconfigs and fix the resulting type errors. Optional hardening, industry-trending default.
+Fix sketch: enable the flag and fix the resulting type errors. Optional hardening, industry-trending default.
