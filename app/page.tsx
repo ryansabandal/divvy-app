@@ -59,7 +59,7 @@ export default function CreateSessionPage() {
     });
 
     if (!res.ok) {
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       setError(body.error ?? "Something went wrong");
       setSubmitting(false);
       return;

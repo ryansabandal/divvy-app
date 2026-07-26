@@ -30,6 +30,11 @@ export const setPaymentMethodSchema = z.object({
   payment_details: z.string().trim().min(1, "payment_details is required").max(200, "payment_details is too long"),
 });
 
+// Schema for PATCH /api/sessions/:sessionId/settlements/:settlementId
+export const updateSettlementSchema = z.object({
+  paid: z.boolean(),
+});
+
 // Schema for PATCH /api/sessions/:sessionId/expenses (bulk reorder)
 export const reorderExpensesSchema = z.object({
   expense_ids: z.array(z.string()).max(50, "expense_ids must be 50 or fewer"),

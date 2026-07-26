@@ -10,8 +10,11 @@ name: Supabase keepalive
 # reset the clock, and check the schedule is still enabled under Actions settings.
 on:
   schedule:
-    # Once a week, well under Supabase's ~7 day pause window
-    - cron: "0 0 * * 0"
+    # Every 3 days, well under Supabase's ~7 day pause window, with real margin for GitHub's own
+    # scheduled-run delays. Off the top-of-hour/top-of-day mark (03:17 UTC) since GitHub warns
+    # those slots see the worst scheduling congestion, where a delay could push a ping past the
+    # pause deadline it exists to prevent.
+    - cron: "17 3 */3 * *"
   workflow_dispatch: {}
 
 jobs:

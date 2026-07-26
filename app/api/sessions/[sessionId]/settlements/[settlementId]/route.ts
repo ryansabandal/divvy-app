@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireValidSessionId } from "@/lib/validation";
 import { serializeSettlement } from "@/lib/serialize";
+import { parseBody } from "@/lib/requestBody";
+import { updateSettlementSchema } from "@/schemas/sessions";
 
 // PATCH /api/sessions/:sessionId/settlements/:settlementId — mark one frozen payment paid/unpaid
 export async function PATCH(
@@ -12,10 +14,9 @@ export async function PATCH(
   const invalidIdResponse = requireValidSessionId(sessionId);
   if (invalidIdResponse) return invalidIdResponse;
 
-  const { paid } = await request.json();
-  if (typeof paid !== "boolean") {
-    return NextResponse.json({ error: "paid must be true or false" }, { status: 400 });
-  }
+  const parsed = await parseBody(request, updateSettlementSchema);
+  if (!parsed.ok) return parsed.response;
+  const { paid } = parsed.data;
 
   // Scope to this session so you can't flip another session's settlement by id. No UUID gate
   // on :settlementId — the id column is TEXT, so an arbitrary string is a legal (non-matching)
