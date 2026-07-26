@@ -15,8 +15,9 @@ A simple bill-splitting app for friend groups. See [CLAUDE.md](CLAUDE.md) for fu
 | Frontend deployment          | ✅ Deployed on Vercel; URL lives in the Vercel dashboard, not committed here |
 | Git / GitHub                 | ✅ Pushed to [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app) (private) |
 | Test coverage                | ✅ Vitest — 8 tests on `backend/src/lib/settle.ts`, the app's one piece of pure business logic |
+| Serverless migration          | 🚧 **In progress** on `develop` — Phase 1 of 5 done (repo restructure), Phase 2 (Supabase) next. See [Target architecture](#target-architecture--single-nextjs-app-migration-in-progress) and [Roadmap](#roadmap--next-steps) |
 
-> **Status:** V1 is **feature-complete, deployed, and formally closed** (2026-07-19). A full-repo hardening pass (audit + fixes) preceded closing it — see [Roadmap](#roadmap--next-steps) for exactly what was done.
+> **Status:** V1 is **feature-complete, deployed, and formally closed** (2026-07-19). A full-repo hardening pass (audit + fixes) preceded closing it — see [Roadmap](#roadmap--next-steps) for exactly what was done. **`main` still deploys the Railway+Express architecture below unchanged** — the migration only touches `develop`.
 
 ## High-level flow
 
@@ -43,6 +44,73 @@ flowchart TD
     Router -->|"Prisma Client, pg driver adapter"| DB
 ```
 
+## Target architecture — single Next.js app (migration in progress)
+
+This is the **end state** the serverless migration (started 2026-07-26, full detail in [Roadmap](#serverless-migration-in-progress-started-2026-07-26)) is building toward: one Next.js app on Vercel, no separate Express server, no Railway bill. It's documented here in full — including the pieces not built yet — rather than only describing what exists today, so the target shape doesn't have to be reconstructed from scattered roadmap notes.
+
+```mermaid
+flowchart TD
+    Browser["Browser — mobile-first, opened via shared link"]
+
+    subgraph Vercel["Vercel — single Next.js app, target state"]
+        Next["Next.js App Router pages<br/>create · session · settle · read-only view<br/>✅ built, live today"]
+        RouteHandlers["Route Handlers — app/api/sessions/*<br/>🚧 pending — Phase 3"]
+        Settle["lib/settle.ts<br/>✅ moved into place — Phase 1, 2026-07-26"]
+    end
+
+    DB[("Supabase Postgres<br/>🚧 pending — Phase 2<br/>Podman Postgres stays the local-dev story, unchanged")]
+
+    Browser --> Next
+    Next -->|"same-origin function call — no HTTP hop, no CORS, once Phase 3 lands"| RouteHandlers
+    RouteHandlers -->|"net balances in, payment plan out"| Settle
+    RouteHandlers -->|"Prisma Client"| DB
+```
+
+**Target `frontend/` tree** (✅ = actually there today · 🚧 = planned, not built yet). "`frontend/`" is a holdover name — nothing renames it, it just becomes the whole app:
+
+```
+frontend/
+├── app/
+│   ├── layout.tsx, globals.css                          ✅ built — root layout + design system
+│   ├── page.tsx, [sessionId]/page.tsx,
+│   │   [sessionId]/settle/page.tsx,
+│   │   [sessionId]/view/page.tsx                        ✅ built — all four V1 pages, untouched by the migration
+│   └── api/
+│       └── sessions/                                    🚧 pending (Phase 3) — Route Handlers replacing backend/src/routes/sessions.ts
+│           ├── route.ts                                  🚧 POST /api/sessions
+│           ├── [sessionId]/route.ts                      🚧 GET /api/sessions/:sessionId
+│           ├── [sessionId]/participants/route.ts         🚧 POST participant
+│           ├── [sessionId]/participants/[participantId]/route.ts   🚧 PATCH payment method
+│           ├── [sessionId]/expenses/route.ts              🚧 POST, PATCH (bulk reorder)
+│           ├── [sessionId]/expenses/[expenseId]/route.ts   🚧 PATCH (edit), DELETE
+│           └── [sessionId]/settlements/route.ts,
+│               [sessionId]/settlements/[settlementId]/route.ts   🚧 GET, POST, PATCH
+├── lib/
+│   ├── db.ts                                             ✅ moved from `backend/src/db.ts` — Phase 1, 2026-07-26
+│   ├── settle.ts, settle.test.ts                         ✅ moved from `backend/src/lib/` — Phase 1, 2026-07-26
+│   └── recentSessions.ts, paymentDetails.ts, apiUrl.ts,
+│       fetcher.ts, expenseBreakdown.ts                   ✅ built — pre-existing frontend-only helpers, untouched
+├── schemas/
+│   └── sessions.ts                                       ✅ moved from `backend/src/schemas/` — Phase 1, 2026-07-26
+├── prisma/
+│   ├── schema.prisma                                     ✅ moved from `backend/prisma/` — Phase 1, 2026-07-26
+│   └── migrations/                                       ✅ moved — same 8 migrations, history preserved via `git mv`
+├── prisma.config.ts                                       ✅ moved from `backend/` — Phase 1, 2026-07-26
+├── components/ExpenseBreakdown.tsx                        ✅ built — untouched
+├── .env                                                   ✅ added — `DATABASE_URL` for `prisma.config.ts`/`lib/db.ts` (separate from `.env.local`'s `NEXT_PUBLIC_API_URL`; Next.js and `dotenv/config` both read plain `.env` automatically)
+└── package.json                                           ✅ merged — backend's runtime deps (`@prisma/client`, `@prisma/adapter-pg`, `pg`, `zod`, `dotenv`) + dev deps (`prisma`, `vitest`, `@types/pg`) added; `express`/`cors`/`ts-node-dev` deliberately left out (Express-only, dropped in Phase 3); `typescript` kept at frontend's existing `^5` rather than backend's `^6.0.3` (lower risk than bumping Next's scaffolded TS version — confirmed safe, see below)
+```
+
+**Phase 1 complete (2026-07-26).** All the moved files are now fully load-bearing in `frontend/`, not just relocated:
+
+- `npm install` in `frontend/` — clean, no peer-dependency conflicts between the two dependency sets
+- `npx prisma generate` from `frontend/` — clean, client generated to `frontend/node_modules/@prisma/client`
+- `npx tsc --noEmit` from `frontend/` — clean (confirms `settle.ts`/`schemas/sessions.ts` compile fine under TS `^5`, no need for backend's `^6`)
+- `npm run test` in `frontend/` (new `vitest run lib` script) — **8/8 passing** on `lib/settle.test.ts` in its new home
+- `backend/`'s own `npm run test` — still **8/8 passing**, confirming the duplicated copies left behind didn't drift or break anything
+
+**What disappears entirely once Phase 4 cuts over:** `backend/` (Express app, its own `package.json`/`tsconfig.json`/`node_modules`, `railway.toml`), Railway's Postgres + hosting, the CORS allow-list (same-origin removes the need), and the 4-argument Express error handler (Route Handlers need their own error-shaping wrapper instead — flagged in Phase 3 as the one genuine design task, not a lift-and-shift).
+
 ## Local dev environment
 
 `compose.yml` defines one service:
@@ -57,6 +125,8 @@ podman-compose down      # stop (keeps data — add -v to wipe the volume)
 ```
 
 ## Backend (`backend/`)
+
+> **Migration note (2026-07-26):** `prisma/`, `prisma.config.ts`, `db.ts`, `lib/settle.ts`+`settle.test.ts`, and `schemas/sessions.ts` were `git mv`'d into `frontend/` as Phase 1 of the [serverless migration](#target-architecture--single-nextjs-app-migration-in-progress), then duplicated back here unchanged so this still-live `:4000` server keeps working untouched. Everything below reflects `backend/`'s current, still-accurate state — this whole directory is slated for deletion once Phase 4 cuts over.
 
 ```
 backend/
@@ -392,7 +462,10 @@ V1 is feature-complete, deployed, and **formally closed** (2026-07-19) — the h
 
 0. ✅ **Done** — HTTP-level integration tests for all 11 routes (`backend/src/routes/sessions.integration.test.ts`, `npm run test:integration`, 80 tests, all passing against the current Express app on `:4000`). Deliberately written against a configurable `TEST_BASE_URL` rather than `supertest`-wrapping the Express app directly, so the identical file becomes the parity proof once the same suite runs clean against Next.js on `:3000`. Two tests are intentionally marked `[current behavior, no max-length — see ticket 18]` — they pin today's gap and are *expected* to start failing once ticket 18's fix lands in Phase 3; that flip is the signal the fix worked, not a regression.
    - **Reviewed 2026-07-26** — three parallel subagents by lens (Behavioral Truth, Coverage & Parity Fitness, Suite Quality & Portability — swapped in place of the standard Correctness/Security/Best-Practice split, since a test file has no attack surface for a Security lens to check). Behavioral Truth and Suite Quality & Portability came back clean. Coverage & Parity Fitness found 6 real gaps, all closed same-day (now 16 additional tests, 64 → 80): malformed non-UUID ids for participant/expense/settlement sub-resources (mirroring the existing `sessionId` regression test), missing session-not-found coverage on 4 routes, missing response-shape/leak-guard assertions on Expense/ExpenseSplit/Settlement (previously only Session/Participant had them), an untested QUANTITY rounding-remainder case, a test pair that actually straddles the `RECONCILED_EPSILON` boundary rather than just its neighborhood, and validation coverage for the edit route independent of POST's. One minor finding (no non-string-`name` type test) was judged too low-value and skipped.
-1. **Repo restructure** — `backend/` dissolves into the single Next.js app. `settle.ts` and its 8 unit tests move untouched behind a `lib/` boundary. `git mv` to preserve file history.
+1. ✅ **Done (2026-07-26)** — **Repo restructure** — the shared library code (`prisma/`, `prisma.config.ts`, `db.ts`, `lib/settle.ts`+`settle.test.ts` — 8 unit tests, untouched — and `schemas/sessions.ts`) now lives in the single Next.js app, with `git mv` preserving file history on the `frontend/` side. Full target shape (including the pieces not built yet): [Target architecture](#target-architecture--single-nextjs-app-migration-in-progress).
+   - **How:** `git mv`'d the files into `frontend/`, then duplicated fresh copies back into `backend/`'s original paths so the live `:4000` server (and Phase 0's test suite, which points at it) keeps working unmodified — two sources of truth for the few days until Phase 4 deletes `backend/` outright, a deliberate tradeoff over a fragile cross-boundary import.
+   - **Also merged:** backend's runtime + dev deps into `frontend/package.json` (`express`/`cors`/`ts-node-dev` deliberately excluded — Express-only, dropped in Phase 3); added `frontend/.env` (`DATABASE_URL`, separate from `.env.local`'s `NEXT_PUBLIC_API_URL`); kept `typescript` at frontend's `^5` rather than backend's `^6.0.3`.
+   - **Verified:** `frontend`'s `npx prisma generate` and `npx tsc --noEmit` both clean; `npm run test` — 8/8 passing on `lib/settle.test.ts` in its new home; `backend`'s own test suite still 8/8, confirming the duplicates didn't break the still-live app.
 2. **Supabase setup + data migration** — provision Supabase Postgres, `pg_dump` from Railway → restore (chosen over starting fresh, since shared session links are permanent and a 404 for someone still holding one is a real harm). Two connection strings needed: pooled (PgBouncer) for the running app, direct for Prisma CLI migrations.
    - **Reordered 2026-07-26** — originally listed after Phase 1 (Supabase-first); swapped because Supabase account setup wasn't done yet and repo restructure has no external blockers, letting the next session start immediately.
 3. **Port the 11 routes** to Next.js Route Handlers, folding in 9 backlog tickets whose fixes are absorbed by the rewrite (see disposition below). The Express `sessionsRouter.param("sessionId", ...)` UUID gate and the 4-argument error handler have no Route Handler equivalent — those need a redesigned shared wrapper, which is the one genuine design task in this phase. **Run the Phase 0 suite against `:3000` when done — green on both `:4000` and `:3000` is the parity proof.**
