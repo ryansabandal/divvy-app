@@ -1,4 +1,4 @@
-Status: backlog (not blocking V1 close)
+Status: resolved
 Severity: Low
 Category: Security
 
@@ -15,3 +15,7 @@ Location: backend/src/routes/sessions.ts:207-223 (POST) and :229-252 (PATCH).
 Fix sketch: trivial once ticket 06 is picked up — add `.max(100)` (name) / `.max(200)` (payment_details) to whatever Zod schema replaces the hand-rolled checks. Do together with 06 rather than as a separate pass.
 
 Found during: code review of commit 68b99ed (edit-expense + reorder feature), 2026-07-19.
+
+## Comments
+
+Fixed 2026-07-26 alongside ticket 06 (Phase 3 of the serverless migration, commit c3a8efd): `addParticipantSchema` caps `name` at 100 chars, `setPaymentMethodSchema` caps `payment_details` at 200 chars — same limits as the rest of `frontend/schemas/sessions.ts`. Verified: the Phase 0 parity suite's two tests that previously pinned "accepts arbitrarily long name/payment_details" as baseline behavior were updated to instead assert `400` for the same over-length inputs — the flip from pass to fail (on the old assertion) was the expected signal the fix landed, per the tests' own pre-existing comments.

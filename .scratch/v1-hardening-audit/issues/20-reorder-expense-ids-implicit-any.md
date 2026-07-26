@@ -1,4 +1,4 @@
-Status: backlog (not blocking V1 close)
+Status: resolved
 Severity: Low
 Category: Type-safety
 
@@ -13,3 +13,7 @@ Location: backend/src/routes/sessions.ts:485 and :520.
 Fix sketch: resolved as a side effect of ticket 17's Zod schema — `reorderExpensesSchema.parse(req.body).expense_ids` would be properly typed as `string[]`, removing the need for the manual `(id: string, index: number)` annotations entirely.
 
 Found during: code review of commit 68b99ed (edit-expense + reorder feature), 2026-07-19.
+
+## Comments
+
+Resolved as a side effect of ticket 17's fix (2026-07-26, commit c3a8efd), exactly as this ticket predicted: `reorderExpensesSchema.safeParse(json).data.expense_ids` is properly typed `string[]` by Zod, so the manual `(id: string, index: number)` annotations in the bulk-reorder handler were dropped as no longer needed. `tsc --noEmit` clean.

@@ -54,14 +54,14 @@ flowchart TD
 
     subgraph Vercel["Vercel — single Next.js app, target state"]
         Next["Next.js App Router pages<br/>create · session · settle · read-only view<br/>✅ built, live today"]
-        RouteHandlers["Route Handlers — app/api/sessions/*<br/>🚧 pending — Phase 3"]
+        RouteHandlers["Route Handlers — app/api/sessions/*<br/>✅ built — Phase 3, 2026-07-26"]
         Settle["lib/settle.ts<br/>✅ moved into place — Phase 1, 2026-07-26"]
     end
 
     DB[("Supabase Postgres<br/>✅ provisioned + data migrated — Phase 2, 2026-07-26<br/>Podman Postgres stays the local-dev story, unchanged")]
 
     Browser --> Next
-    Next -->|"same-origin function call — no HTTP hop, no CORS, once Phase 3 lands"| RouteHandlers
+    Next -->|"same-origin function call — no HTTP hop, no CORS, once Phase 4 cuts over"| RouteHandlers
     RouteHandlers -->|"net balances in, payment plan out"| Settle
     RouteHandlers -->|"Prisma Client"| DB
 ```
@@ -74,24 +74,28 @@ frontend/
 │   ├── layout.tsx, globals.css                          ✅ built — root layout + design system
 │   ├── page.tsx, [sessionId]/page.tsx,
 │   │   [sessionId]/settle/page.tsx,
-│   │   [sessionId]/view/page.tsx                        ✅ built — all four V1 pages, untouched by the migration
+│   │   [sessionId]/view/page.tsx                        ✅ built — all four V1 pages, still calling Express via NEXT_PUBLIC_API_URL until Phase 4 rewires them to same-origin relative paths
 │   └── api/
-│       └── sessions/                                    🚧 pending (Phase 3) — Route Handlers replacing backend/src/routes/sessions.ts
-│           ├── route.ts                                  🚧 POST /api/sessions
-│           ├── [sessionId]/route.ts                      🚧 GET /api/sessions/:sessionId
-│           ├── [sessionId]/participants/route.ts         🚧 POST participant
-│           ├── [sessionId]/participants/[participantId]/route.ts   🚧 PATCH payment method
-│           ├── [sessionId]/expenses/route.ts              🚧 POST, PATCH (bulk reorder)
-│           ├── [sessionId]/expenses/[expenseId]/route.ts   🚧 PATCH (edit), DELETE
+│       ├── health/route.ts                               ✅ built — Phase 3, 2026-07-26
+│       └── sessions/                                     ✅ built — Phase 3, 2026-07-26 — Route Handlers replacing backend/src/routes/sessions.ts
+│           ├── route.ts                                  ✅ POST /api/sessions
+│           ├── [sessionId]/route.ts                      ✅ GET /api/sessions/:sessionId
+│           ├── [sessionId]/participants/route.ts         ✅ POST participant
+│           ├── [sessionId]/participants/[participantId]/route.ts   ✅ PATCH payment method
+│           ├── [sessionId]/expenses/route.ts              ✅ POST, PATCH (bulk reorder)
+│           ├── [sessionId]/expenses/[expenseId]/route.ts   ✅ PATCH (edit), DELETE
 │           └── [sessionId]/settlements/route.ts,
-│               [sessionId]/settlements/[settlementId]/route.ts   🚧 GET, POST, PATCH
+│               [sessionId]/settlements/[settlementId]/route.ts   ✅ GET, POST, PATCH
 ├── lib/
 │   ├── db.ts                                             ✅ moved from `backend/src/db.ts` — Phase 1, 2026-07-26
 │   ├── settle.ts, settle.test.ts                         ✅ moved from `backend/src/lib/` — Phase 1, 2026-07-26
+│   ├── validation.ts, requestBody.ts, serialize.ts,
+│   │   settlementHelpers.ts, expenseSplits.ts,
+│   │   expenseSession.ts                                 ✅ built — Phase 3, 2026-07-26 — logic shared across the Route Handlers above; detail in the Roadmap's Phase 3 entry
 │   └── recentSessions.ts, paymentDetails.ts, apiUrl.ts,
 │       fetcher.ts, expenseBreakdown.ts                   ✅ built — pre-existing frontend-only helpers, untouched
 ├── schemas/
-│   └── sessions.ts                                       ✅ moved from `backend/src/schemas/` — Phase 1, 2026-07-26
+│   └── sessions.ts                                       ✅ moved from `backend/src/schemas/` (Phase 1) + extended with `addParticipantSchema`/`setPaymentMethodSchema`/`reorderExpensesSchema` (Phase 3, 2026-07-26)
 ├── prisma/
 │   ├── schema.prisma                                     ✅ moved from `backend/prisma/` — Phase 1, 2026-07-26
 │   └── migrations/                                       ✅ moved — same 8 migrations, history preserved via `git mv`
@@ -109,7 +113,9 @@ frontend/
 - `npm run test` in `frontend/` (new `vitest run lib` script) — **8/8 passing** on `lib/settle.test.ts` in its new home
 - `backend/`'s own `npm run test` — still **8/8 passing**, confirming the duplicated copies left behind didn't drift or break anything
 
-**What disappears entirely once Phase 4 cuts over:** `backend/` (Express app, its own `package.json`/`tsconfig.json`/`node_modules`, `railway.toml`), Railway's Postgres + hosting, the CORS allow-list (same-origin removes the need), and the 4-argument Express error handler (Route Handlers need their own error-shaping wrapper instead — flagged in Phase 3 as the one genuine design task, not a lift-and-shift).
+**Phase 3 complete (2026-07-26).** Full detail (including the mid-phase ticket-fold-in scope correction and the two review passes) is in [Roadmap](#serverless-migration-in-progress-started-2026-07-26). One correction to this section's original plan: Express's `router.param("sessionId", ...)` UUID gate turned out to need only a small per-handler helper (`requireValidSessionId()`), not a "redesigned shared wrapper" — and the 4-argument Express error handler turned out to need **no replacement at all**, since Route Handlers have no equivalent central catch-all to begin with (an uncaught exception just falls through to Next's own default 500). Verified: `tsc --noEmit` clean, `eslint` clean, Phase 0's 80-test integration suite passing against `next dev` on `:3000`.
+
+**What disappears entirely once Phase 4 cuts over:** `backend/` (Express app, its own `package.json`/`tsconfig.json`/`node_modules`, `railway.toml`), Railway's Postgres + hosting, and the CORS allow-list (same-origin removes the need). The frontend pages themselves (`app/**/page.tsx`) still call Express via `NEXT_PUBLIC_API_URL`/`lib/apiUrl.ts` today — rewiring them to same-origin relative paths against the new Route Handlers is Phase 4's job, not Phase 3's.
 
 ## Local dev environment
 
