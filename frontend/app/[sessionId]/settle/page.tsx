@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { parseBankDetails } from "@/lib/paymentDetails";
-import { apiUrl } from "@/lib/apiUrl";
 import { fetcher } from "@/lib/fetcher";
 import { buildParticipantBreakdown, type BreakdownExpense } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
@@ -53,14 +52,14 @@ export default function SettlePage() {
 
   // SWR owns the fetch + cache + re-render; the key is null until sessionId is known so it won't fire early
   const { data, error, mutate } = useSWR<SettlementsResponse>(
-    sessionId ? apiUrl(`/api/sessions/${sessionId}/settlements`) : null,
+    sessionId ? `/api/sessions/${sessionId}/settlements` : null,
     (url: string) => fetcher(url, "Failed to load settlements"),
   );
 
   // Second, independent fetch for payment methods — shares SWR's cache with the session page,
   // so this is often instant if the user arrived via the "Settle up" link
   const { data: session } = useSWR<Session>(
-    sessionId ? apiUrl(`/api/sessions/${sessionId}`) : null,
+    sessionId ? `/api/sessions/${sessionId}` : null,
     (url: string) => fetcher(url, "Failed to load settlements"),
   );
 
@@ -137,7 +136,7 @@ export default function SettlePage() {
     );
     if (!confirmed) return;
     setActionError(null);
-    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/settlements`), { method: "POST" });
+    const res = await fetch(`/api/sessions/${sessionId}/settlements`, { method: "POST" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       setActionError(body.error ?? "Failed to finalize plan");
@@ -153,7 +152,7 @@ export default function SettlePage() {
     );
     if (!confirmed) return;
     setActionError(null);
-    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/settlements`), { method: "POST" });
+    const res = await fetch(`/api/sessions/${sessionId}/settlements`, { method: "POST" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       setActionError(body.error ?? "Failed to recalculate plan");
@@ -165,7 +164,7 @@ export default function SettlePage() {
   // Flip one payment's paid state, then refetch so the progress bar and styling stay in sync
   async function handleTogglePaid(settlementId: string, currentlyPaid: boolean) {
     setActionError(null);
-    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/settlements/${settlementId}`), {
+    const res = await fetch(`/api/sessions/${sessionId}/settlements/${settlementId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paid: !currentlyPaid }),

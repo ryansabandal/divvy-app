@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 .env.*
+# Templates are meant to be committed so a fresh clone knows what vars to set
+!*.example
 .DS_Store
 .next/
 *.tsbuildinfo

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getRecentSessions, saveRecentSession, type RecentSession } from "@/lib/recentSessions";
-import { apiUrl } from "@/lib/apiUrl";
 
 // Create a session: name the bill, list who's splitting it, then go straight to that session
 export default function CreateSessionPage() {
@@ -19,6 +18,8 @@ export default function CreateSessionPage() {
   // it during render would return different content client vs. server and cause a hydration mismatch.
   const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
   useEffect(() => {
+    // localStorage read, not derived render state — the rule's cascading-render concern doesn't apply here
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRecentSessions(getRecentSessions());
   }, []);
 
@@ -51,7 +52,7 @@ export default function CreateSessionPage() {
     }
 
     setSubmitting(true);
-    const res = await fetch(apiUrl("/api/sessions"), {
+    const res = await fetch("/api/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: name.trim(), participants: cleanedParticipants }),

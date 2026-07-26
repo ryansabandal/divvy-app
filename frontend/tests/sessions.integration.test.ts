@@ -10,8 +10,9 @@
 
 import { describe, it, expect } from "vitest";
 
-// Which server to test. Express dev server today; http://localhost:3000 after the Next.js port.
-const BASE_URL = process.env.TEST_BASE_URL ?? "http://localhost:4000";
+// Which server to test. Defaults to the Next.js dev server; override via TEST_BASE_URL to point
+// at a Vercel preview/production URL instead.
+const BASE_URL = process.env.TEST_BASE_URL ?? "http://localhost:3000";
 
 // One small wrapper around fetch so every test reads as "call this path, get back status + body".
 // Returns the parsed body, or null for empty responses (DELETE returns 204 with no body).

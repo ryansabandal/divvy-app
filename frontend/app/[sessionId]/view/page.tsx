@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { parseBankDetails } from "@/lib/paymentDetails";
-import { apiUrl } from "@/lib/apiUrl";
 import { fetcher } from "@/lib/fetcher";
 import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
@@ -66,11 +65,11 @@ export default function ViewPage() {
 
   // Two independent SWR fetches: session data (expenses + participants) + settlement plan
   const { data: session, error: sessionError } = useSWR<Session>(
-    sessionId ? apiUrl(`/api/sessions/${sessionId}`) : null,
+    sessionId ? `/api/sessions/${sessionId}` : null,
     (url: string) => fetcher(url, "Failed to load session"),
   );
   const { data: settlementsData, error: settlementsError } = useSWR<SettlementsResponse>(
-    sessionId ? apiUrl(`/api/sessions/${sessionId}/settlements`) : null,
+    sessionId ? `/api/sessions/${sessionId}/settlements` : null,
     (url: string) => fetcher(url, "Failed to load session"),
   );
 

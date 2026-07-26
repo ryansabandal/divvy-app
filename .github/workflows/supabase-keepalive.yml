@@ -1,0 +1,22 @@
+name: Supabase keepalive
+
+# Supabase's free tier pauses a project after ~7 days of low activity. Divvy has no login —
+# every session is reached via a shared link that must keep working indefinitely — so an
+# unexpected pause is a hard outage. This hits /api/health, which runs a real `SELECT 1`
+# through Prisma (not just a static 200), so it registers as genuine database activity.
+#
+# NOTE: GitHub disables scheduled workflows after 60 days with no repository activity. If pings
+# stop showing up in the Actions tab, re-trigger this manually (workflow_dispatch, below) to
+# reset the clock, and check the schedule is still enabled under Actions settings.
+on:
+  schedule:
+    # Once a week, well under Supabase's ~7 day pause window
+    - cron: "0 0 * * 0"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit /api/health to keep the Supabase project active
+        run: curl --fail https://divvy-app-zeta.vercel.app/api/health

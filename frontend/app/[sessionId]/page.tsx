@@ -23,7 +23,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { saveRecentSession } from "@/lib/recentSessions";
 import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
-import { apiUrl } from "@/lib/apiUrl";
 import { fetcher } from "@/lib/fetcher";
 
 // Shape of the data returned by GET /api/sessions/:sessionId
@@ -150,7 +149,7 @@ export default function SessionPage() {
   // SWR owns the fetching, caching, and re-render — no useEffect/useState/useCallback for the data.
   // mutate() re-runs the fetcher so we can refresh the list after adding an expense.
   const { data: session, error, mutate } = useSWR<Session>(
-    sessionId ? apiUrl(`/api/sessions/${sessionId}`) : null,
+    sessionId ? `/api/sessions/${sessionId}` : null,
     (url: string) => fetcher(url, "Failed to load session"),
   );
 
@@ -258,14 +257,11 @@ export default function SessionPage() {
     }
 
     setSavingPaymentMethod(true);
-    const res = await fetch(
-      apiUrl(`/api/sessions/${sessionId}/participants/${participantId}`),
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payment_method_type: paymentMethodType, payment_details: details }),
-      },
-    );
+    const res = await fetch(`/api/sessions/${sessionId}/participants/${participantId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payment_method_type: paymentMethodType, payment_details: details }),
+    });
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -284,10 +280,7 @@ export default function SessionPage() {
     if (!window.confirm("Remove this expense?")) return;
     setDeleteError(null);
     setDeletingExpenseId(expenseId);
-    const res = await fetch(
-      apiUrl(`/api/sessions/${sessionId}/expenses/${expenseId}`),
-      { method: "DELETE" },
-    );
+    const res = await fetch(`/api/sessions/${sessionId}/expenses/${expenseId}`, { method: "DELETE" });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       setDeleteError(body.error ?? "Failed to delete expense");
@@ -317,7 +310,7 @@ export default function SessionPage() {
     setReorderError(null);
     await mutate({ ...session, expenses: reordered }, { revalidate: false });
 
-    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/expenses`), {
+    const res = await fetch(`/api/sessions/${sessionId}/expenses`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expense_ids: reordered.map((exp) => exp.id) }),
@@ -480,8 +473,8 @@ export default function SessionPage() {
     setSubmitting(true);
     // Editing an existing expense PATCHes it in place; otherwise POST creates a new one
     const url = editingExpenseId
-      ? apiUrl(`/api/sessions/${sessionId}/expenses/${editingExpenseId}`)
-      : apiUrl(`/api/sessions/${sessionId}/expenses`);
+      ? `/api/sessions/${sessionId}/expenses/${editingExpenseId}`
+      : `/api/sessions/${sessionId}/expenses`;
     const res = await fetch(url, {
       method: editingExpenseId ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
