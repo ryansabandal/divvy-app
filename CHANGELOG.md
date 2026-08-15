@@ -2,7 +2,9 @@
 
 Dated record of what changed, why, and how it was verified — migration phases, hardening audits, and V2 planning notes. For current architecture, see [README.md](README.md); for product scope, see [CLAUDE.md](CLAUDE.md); for local setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-V1 is feature-complete, deployed, and **formally closed** (2026-07-19). The **serverless migration** off Railway is also **complete** (2026-07-26, phases 0 through F below) — Divvy now runs as a single Vercel project against Supabase Postgres, with no monthly Railway subscription. What's left is the small open backlog under [Phase 5](#serverless-migration-complete--2026-07-26) plus the deferred V2 trio.
+> **Current priority:** provision **Supabase Storage** (one bucket, folder-prefixed by feature + session id, public read — see [CLAUDE.md](CLAUDE.md#v2-file-uploads--locked-constraints)). Nothing is provisioned yet, and it's the shared prerequisite blocking all three V2 features. Once it's up, ship **QR Ph upload** first — smallest complete slice, validates the whole upload pipeline with no new external provider. Full sequencing under [V2](#v2-scoped-2026-07-26-groundwork-started-2026-08-15) below.
+
+V1 is feature-complete, deployed, and **formally closed** (2026-07-19). The **serverless migration** off Railway is also **complete** (2026-07-26, phases 0 through F below), and its post-migration backlog (Phase 5) is fully closed. V2 groundwork (shared settlement UI components, tickets 04/11) closed 2026-08-15. What's left is the deferred V2 trio, gated on Storage setup above.
 
 ### Serverless migration (complete — 2026-07-26)
 
@@ -124,9 +126,9 @@ Backlog ticket 04 (settle/view payment-action + progress-bar UI duplicated) and 
 - **Deliberately not extracted:** the settlement row `<li>` itself (name → name, amount, paid styling) — settle wraps the name in a `<label>` with a paid-checkbox that view doesn't have, and the two rows are expected to diverge further once proof-of-payment lands (settle gets an upload control, view gets a read-only link). Revisit when that real shared shape is known.
 - **Verified**, not just written: `tsc --noEmit` clean, lint clean (1 pre-existing unrelated warning), full `next build` clean, `npm test` 8/8, `npm run test:integration` 80/80 (HTTP-level, can't see a component extraction — the real check is below), plus a live Playwright click-through against a purpose-built session (GCash creditor, Bank Transfer creditor showing only the account number copied, a no-payment-method creditor exercising the fallback, a finalized plan with one row paid, and a forced-stale plan) with both settle and view screenshotted and reviewed. Three-lens subagent review (Correctness/Security/Best-Practice) came back clean on the actual component change.
 
-### V2 (scoped 2026-07-26, not started)
+### V2 (scoped 2026-07-26, groundwork started 2026-08-15)
 
-All three need file storage — solve that once for all rather than building upload infra piecemeal. Supabase Storage is now available infra (it's *why* Supabase was chosen over Neon in the migration), but no bucket is provisioned yet.
+All three need file storage — solve that once for all rather than building upload infra piecemeal. Supabase Storage is now available infra (it's *why* Supabase was chosen over Neon in the migration), but no bucket is provisioned yet — see the priority callout at the top of this file.
 
 - **QR Ph code upload** for payment methods — the intended end-state for GCash/Maya/bank payments (payer scans instead of copying a number)
 - **Receipt photo OCR** — auto-parse an itemised bill instead of manual entry
