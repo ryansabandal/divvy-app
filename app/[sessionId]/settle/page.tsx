@@ -8,6 +8,7 @@ import { fetcher } from "@/lib/fetcher";
 import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
 import { PaymentAction } from "@/components/PaymentAction";
+import { SessionSummary } from "@/components/SessionSummary";
 import { SettlementProgress } from "@/components/SettlementProgress";
 import { StalePlanBanner } from "@/components/StalePlanBanner";
 import type { Session, SettlementsResponse } from "@/lib/types";
@@ -96,10 +97,21 @@ export default function SettlePage() {
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-navy mb-1">Settle up</h1>
-        <p className="text-sm text-navy/50 mb-8">
+        <h1 className="text-3xl font-bold text-navy mb-1">
+          Settle <span className="heading-accent">up</span>
+        </h1>
+        <p className="text-sm text-navy/50 mb-4">
           {frozen ? "Track who's paid back" : "Who owes who, with the fewest payments"}
         </p>
+
+        {/* Guarded on `session` — this page renders as soon as the settlements fetch resolves,
+            while the session fetch (which carries expenses) may still be in flight */}
+        {session && (
+          <SessionSummary
+            expenses={session.expenses}
+            participantCount={session.participants.length}
+          />
+        )}
 
         {settlements.length === 0 ? (
           // Either nobody owes anything, or a frozen plan with zero rows looks identical to a

@@ -2,7 +2,13 @@
 
 Dated record of what changed, why, and how it was verified — migration phases, hardening audits, and V2 planning notes. For current architecture, see [README.md](README.md); for product scope, see [CLAUDE.md](CLAUDE.md); for local setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-> **Current priority:** provision **Supabase Storage** (one bucket, folder-prefixed by feature + session id, public read — see [CLAUDE.md](CLAUDE.md#v2-file-uploads--locked-constraints)). Nothing is provisioned yet, and it's the shared prerequisite blocking all three V2 features. Once it's up, ship **QR Ph upload** first — smallest complete slice, validates the whole upload pipeline with no new external provider. Full sequencing under [V2](#v2-scoped-2026-07-26-groundwork-started-2026-08-15) below.
+> **Current priority — finish the design refresh (2026-08-15, in progress, uncommitted):**
+> 1. **UI tuning** — palette/type/spacing adjustments on the forest-cream refresh below. One open question already logged: the settle screen now shows "Total spent" directly above "₱X of ₱Y paid", two legitimately different figures that sit close enough to read as a discrepancy.
+> 2. **Three-lens code review** — `correctness-reviewer` / `security-reviewer` / `best-practice-reviewer`, per CLAUDE.md. Not yet run on this change.
+>
+> Then docs + commit. Working plan: `.scratch/plans/design-refresh-forest-cream.md` (gitignored, local-only).
+>
+> **After that, V2 resumes** at its real next step: provision **Supabase Storage** (one bucket, folder-prefixed by feature + session id, public read — see [CLAUDE.md](CLAUDE.md#v2-file-uploads--locked-constraints)). Nothing is provisioned yet, and it's the shared prerequisite blocking all three V2 features. Then ship **QR Ph upload** first — smallest complete slice, no new external provider. Full sequencing under [V2](#v2-scoped-2026-07-26-groundwork-started-2026-08-15) below.
 
 V1 is feature-complete, deployed, and **formally closed** (2026-07-19). The **serverless migration** off Railway is also **complete** (2026-07-26, phases 0 through F below), and its post-migration backlog (Phase 5) is fully closed. V2 groundwork (shared settlement UI components, tickets 04/11) closed 2026-08-15. What's left is the deferred V2 trio, gated on Storage setup above.
 

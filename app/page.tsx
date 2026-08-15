@@ -94,7 +94,9 @@ export default function CreateSessionPage() {
           </section>
         )}
 
-        <h1 className="text-2xl font-bold text-navy mb-1">New session</h1>
+        <h1 className="text-3xl font-bold text-navy mb-1">
+          New <span className="heading-accent">session</span>
+        </h1>
         <p className="text-sm text-navy/50 mb-8">Name the bill and add everyone splitting it.</p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">

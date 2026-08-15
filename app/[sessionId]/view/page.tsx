@@ -6,6 +6,7 @@ import { fetcher } from "@/lib/fetcher";
 import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
 import { PaymentAction } from "@/components/PaymentAction";
+import { SessionSummary } from "@/components/SessionSummary";
 import { SettlementProgress } from "@/components/SettlementProgress";
 import { StalePlanBanner } from "@/components/StalePlanBanner";
 import type { Session, SettlementsResponse } from "@/lib/types";
@@ -41,8 +42,13 @@ export default function ViewPage() {
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-navy mb-1">{session.name}</h1>
-        <p className="text-sm text-navy/50 mb-8">{session.participants.length} people</p>
+        <h1 className="heading-title text-3xl text-navy mb-4">{session.name}</h1>
+
+        {/* The old "{n} people" subtitle lived here; that fact is now a tile in the summary */}
+        <SessionSummary
+          expenses={session.expenses}
+          participantCount={session.participants.length}
+        />
 
         {/* Expenses — read-only; same card layout as the session page minus the delete button */}
         <section className="mb-8">

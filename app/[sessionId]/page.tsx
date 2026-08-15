@@ -24,6 +24,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { saveRecentSession } from "@/lib/recentSessions";
 import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
 import { fetcher } from "@/lib/fetcher";
+import { SessionSummary } from "@/components/SessionSummary";
 import type { Participant, Expense, Session } from "@/lib/types";
 
 // One draggable expense card. Pulled out as its own component (rather than inlined in a .map())
@@ -474,8 +475,15 @@ export default function SessionPage() {
         <Link href="/" className="mb-4 inline-block text-sm font-medium text-teal">
           ← Home
         </Link>
-        <h1 className="text-2xl font-bold text-navy mb-1">{session.name}</h1>
-        <p className="text-sm text-navy/50 mb-8">{session.participants.length} people</p>
+        {/* Serif upright, not italic and not bold — Instrument Serif is weight-400 only,
+            so font-bold would synthesise a fake bold rather than load a real one */}
+        <h1 className="heading-title text-3xl text-navy mb-4">{session.name}</h1>
+
+        {/* The old "{n} people" subtitle lived here; that fact is now a tile in the summary */}
+        <SessionSummary
+          expenses={session.expenses}
+          participantCount={session.participants.length}
+        />
 
         {/* Participants — tap a row to set that person's payment method for the settle screen */}
         <section className="mb-8">

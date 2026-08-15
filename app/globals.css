@@ -6,10 +6,19 @@
    can reference them with var(--color-*).
    Change one value here to propagate across the whole app. */
 @theme inline {
-  --color-navy:  #1e3a5f;
-  --color-teal:  #0f9488;
-  --color-sky:   #bae6fd;
-  --color-beige: #f5efe6;
+  /* NOTE: these token NAMES are historical and no longer describe their colors.
+     The 2026-08-15 design refresh moved the palette from navy/teal to forest/sage
+     but kept the names, because "navy" alone has ~100 call sites across the app —
+     renaming would bury a visual change inside a 127-site mechanical sweep.
+     Read them as roles, not colors:
+       navy  = darkest ink — header, dark tiles, primary text
+       teal  = interactive accent — CTAs, links, progress fill
+       sky   = accent tile surface
+       beige = page background */
+  --color-navy:  #1b3a30;
+  --color-teal:  #3d7a63;
+  --color-sky:   #e4dccb;
+  --color-beige: #efeae0;
   --font-sans:   var(--font-geist-sans);
   --font-mono:   var(--font-geist-mono);
 }
@@ -131,6 +140,73 @@ body {
 }
 .input::placeholder { color: var(--color-navy-30); }
 .input:focus { outline: none; box-shadow: 0 0 0 2px var(--color-teal-40); }
+
+/* ─── Heading serif ─────────────────────────────────────────────────────────
+   Instrument Serif, used sparingly for editorial contrast against Geist Sans.
+   Two variants, deliberately distinct:
+     .heading-accent — italic, for ONE static word inside a sans heading
+                       ("New /session/"). This is the brand voice.
+     .heading-title  — upright, for user-supplied titles (a session name).
+                       Not italic: an arbitrary name like "Bar tab 3/14" reads
+                       badly slanted, and italicising someone's typed text
+                       implies an emphasis they didn't ask for.
+   Never applied to body copy, labels, or numbers. */
+.heading-accent {
+  font-family: var(--font-instrument-serif), Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+}
+.heading-title {
+  font-family: var(--font-instrument-serif), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+/* ─── Bento summary tiles ───────────────────────────────────────────────────
+   Session-summary grid: a big number as the visual anchor with a small label
+   under it. Two columns is the honest maximum inside the app's max-w-sm
+   (384px) column, so the hero tile spans both and the rest sit 2-up. */
+.bento-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+.bento-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-navy-10);
+  background-color: #ffffff;
+  padding: 0.875rem 1rem;
+}
+.bento-tile-wide { grid-column: span 2; }
+
+/* Dark + cream variants, mirroring the mixed-surface grid this design borrows from */
+.bento-tile-dark  { border-color: transparent; background-color: var(--color-navy); }
+.bento-tile-cream { border-color: transparent; background-color: var(--color-sky); }
+
+/* The number itself — tabular figures so digits don't jitter between renders
+   (amounts update live as expenses are added/edited) */
+.bento-value {
+  font-size: 1.5rem;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-navy);
+}
+.bento-tile-wide .bento-value { font-size: 2rem; }
+.bento-tile-dark .bento-value { color: #ffffff; }
+
+.bento-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-navy-50);
+}
+.bento-tile-dark .bento-label { color: rgb(255 255 255 / 0.55); }
 
 /* Section heading — "Who's splitting", "Expenses", "Add an expense" */
 .section-label {
