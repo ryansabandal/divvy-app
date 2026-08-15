@@ -48,7 +48,10 @@ divvy-app/
 │   ├── settle.test.ts                        # Vitest unit tests, incl. regression coverage for the residual-cent fix
 │   └── validation.ts                         # requireValidSessionId() and friends
 ├── components/
-│   └── ExpenseBreakdown.tsx                  # collapsible per-person charge list, shared by the settle + view pages
+│   ├── ExpenseBreakdown.tsx                  # collapsible per-person charge list, shared by the settle + view pages
+│   ├── PaymentAction.tsx                     # payment-method label/display/copy, shared by the settle + view pages
+│   ├── SettlementProgress.tsx                # progress bar (incl. ARIA), shared by the settle + view pages
+│   └── StalePlanBanner.tsx                   # "expenses changed since finalizing" warning, shared by the settle + view pages
 ├── schemas/
 │   └── sessions.ts                           # Zod schemas for every request body
 ├── prisma/
@@ -136,7 +139,7 @@ enum PaymentMethodType {
 
 ## V1 Features (Strict Scope)
 
-> **Status:** V1 is **feature-complete, deployed, and formally closed** (hardening pass completed 2026-07-19 — a full-repo audit plus every fix it produced). **Current priority and next steps always live in [README.md](README.md#roadmap--next-steps), not here** — this file is the spec and goes stale fast if status is duplicated into it.
+> **Status:** V1 is **feature-complete, deployed, and formally closed** (hardening pass completed 2026-07-19 — a full-repo audit plus every fix it produced). **Current priority and next steps always live in [CHANGELOG.md](CHANGELOG.md), not here** — this file is the spec and goes stale fast if status is duplicated into it.
 >
 > **Post-close additions (2026-07-19):** edit-in-place + drag-and-drop reorder for expenses, and per-person charge breakdown (both below) — neither needed file-storage infra, so unlike the V2 trio they weren't held for that gate; added as direct quality improvements on an already-closed V1.
 
@@ -167,7 +170,7 @@ enum PaymentMethodType {
 
 ## V2 File Uploads — Locked Constraints
 
-All three deferred V2 features (QR Ph upload, receipt OCR, proof-of-payment screenshots) need file storage. These constraints were researched against current platform docs on 2026-07-26 and are **settled** — they're properties of the stack, not preferences to re-litigate. Status, shipping order, and the still-open product questions live in [README.md](README.md#roadmap--next-steps), not here.
+All three deferred V2 features (QR Ph upload, receipt OCR, proof-of-payment screenshots) need file storage. These constraints were researched against current platform docs on 2026-07-26 and are **settled** — they're properties of the stack, not preferences to re-litigate. Status, shipping order, and the still-open product questions live in [CHANGELOG.md](CHANGELOG.md), not here.
 
 - **Uploads never proxy through a Route Handler.** Vercel Functions cap every request/response body at 4.5 MB on every plan, which a phone photo exceeds. Use Supabase signed direct-upload URLs: the client uploads straight to Storage, and the Route Handler only mints a short-lived token.
 - **No Supabase Auth — use a server-side gatekeeper.** Prisma connects directly to Postgres, bypassing PostgREST and RLS, so Storage's usual `auth.uid()`-based policies don't apply. The Route Handler authorizes the request via Prisma, then uses the Storage service-role key to issue the signed URL. Don't stand up Supabase Auth just for uploads.

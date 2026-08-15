@@ -4,11 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
-import { parseBankDetails } from "@/lib/paymentDetails";
 import { fetcher } from "@/lib/fetcher";
 import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
-import type { Session, Settlement, SettlementsResponse } from "@/lib/types";
+import { PaymentAction } from "@/components/PaymentAction";
+import { SettlementProgress } from "@/components/SettlementProgress";
+import { StalePlanBanner } from "@/components/StalePlanBanner";
+import type { Session, SettlementsResponse } from "@/lib/types";
 
 // Settlement screen: live preview until finalized, then a trackable plan with paid checkboxes
 export default function SettlePage() {
@@ -28,16 +30,8 @@ export default function SettlePage() {
     (url: string) => fetcher(url, "Failed to load settlements"),
   );
 
-  // Tracks which settlement row's bank details were just copied, to show "Copied!" briefly
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   // Holds an error message from Finalize / Recalculate / Toggle-paid if the server returns non-2xx
   const [actionError, setActionError] = useState<string | null>(null);
-
-  async function handleCopy(text: string, key: string) {
-    await navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 1500);
-  }
 
   if (error) {
     return <main className="flex-1 px-4 py-10 text-center text-red-500">{error.message}</main>;
@@ -48,49 +42,6 @@ export default function SettlePage() {
 
   const { frozen, stale, settlements } = data;
   const participantsById = new Map((session?.participants ?? []).map((p) => [p.id, p]));
-
-  // Render how the debtor should pay the creditor for one row, based on the creditor's saved method.
-  // None of GCash/Maya/Bank offer a working public deep link, so all three show the detail + a Copy
-  // button — the payer copies the number/account and pays inside the relevant app themselves.
-  function renderPaymentAction(s: Settlement) {
-    const creditor = participantsById.get(s.to_id);
-    if (!creditor || !creditor.payment_method_type || !creditor.payment_details) {
-      return <p className="text-xs text-navy/40">{s.to_name} hasn&apos;t added a payment method yet</p>;
-    }
-
-    // Bank transfer is stored as "Bank Name - Account Number" — show bank name as label,
-    // display and copy only the account number so the payer doesn't accidentally include the bank name
-    let methodLabel: string;
-    let displayText: string;
-    let copyText: string;
-    if (creditor.payment_method_type === "BANK_TRANSFER") {
-      const { bankName, accountNumber } = parseBankDetails(creditor.payment_details);
-      methodLabel = bankName || "Bank";
-      displayText = accountNumber;
-      copyText = accountNumber;
-    } else {
-      methodLabel = creditor.payment_method_type === "GCASH" ? "GCash" : "Maya";
-      displayText = creditor.payment_details;
-      copyText = creditor.payment_details;
-    }
-
-    const key = s.id ?? `${s.from_id}-${s.to_id}`;
-    return (
-      <div className="flex items-center justify-between gap-2 rounded-xl bg-beige px-3 py-2">
-        <span className="text-sm text-navy">
-          <span className="text-navy/40">{methodLabel} · </span>
-          {displayText}
-        </span>
-        <button
-          type="button"
-          onClick={() => handleCopy(copyText, key)}
-          className="btn-compact shrink-0"
-        >
-          {copiedKey === key ? "Copied!" : "Copy"}
-        </button>
-      </div>
-    );
-  }
 
   // Freeze the live preview into trackable rows. Expenses stay editable afterward — Recalculate
   // (below) is how later edits get folded back in, at the cost of resetting paid progress.
@@ -142,12 +93,6 @@ export default function SettlePage() {
     await mutate();
   }
 
-  // Progress numbers only mean anything once a plan is frozen and has paid flags to count
-  const paidSettlements = frozen ? settlements.filter((s) => s.paid) : [];
-  const paidAmount = paidSettlements.reduce((sum, s) => sum + s.amount, 0);
-  const totalAmount = settlements.reduce((sum, s) => sum + s.amount, 0);
-  const progressPct = settlements.length > 0 ? (paidSettlements.length / settlements.length) * 100 : 0;
-
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
@@ -162,27 +107,14 @@ export default function SettlePage() {
           <p className="text-sm text-navy/40">🎉 All settled up — no payments needed.</p>
         ) : (
           <>
-            {frozen && (
-              // Progress bar: how much of the frozen plan has actually been paid back
-              <div className="mb-6">
-                <div className="h-2 w-full rounded-full bg-navy/10">
-                  <div
-                    className="h-2 rounded-full bg-teal transition-all"
-                    style={{ width: `${progressPct}%` }}
-                  />
-                </div>
-                <p className="mt-1.5 text-xs text-navy/50">
-                  {paidSettlements.length} of {settlements.length} paid · ₱{paidAmount.toFixed(2)} of ₱
-                  {totalAmount.toFixed(2)}
-                </p>
-              </div>
-            )}
+            {/* Progress bar: how much of the frozen plan has actually been paid back */}
+            <SettlementProgress settlements={settlements} frozen={frozen} />
 
             {/* Stale-plan warning: shown when expenses changed after the plan was finalized */}
             {frozen && stale && (
-              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                Expenses have changed since this plan was finalized — the amounts below may be out of date. Hit <strong>Recalculate</strong> to update.
-              </div>
+              <StalePlanBanner>
+                Hit <strong>Recalculate</strong> to update.
+              </StalePlanBanner>
             )}
 
             <ul className="flex flex-col gap-3">
@@ -214,7 +146,7 @@ export default function SettlePage() {
                   </div>
 
                   {/* How the debtor should actually pay the creditor */}
-                  {renderPaymentAction(s)}
+                  <PaymentAction creditor={participantsById.get(s.to_id)} creditorName={s.to_name} />
 
                   {/* What the debtor is actually being charged for, so they can verify their own
                       line items without scrolling the whole expense list back on the session page */}

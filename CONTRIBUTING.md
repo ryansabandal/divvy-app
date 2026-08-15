@@ -10,6 +10,15 @@ This file is deliberately just setup + workflow — it does not re-explain eithe
 - **Node.js** (v20+) and npm
 - **Podman** + **podman-compose** (the container runtime this project standardizes on — rootless/daemonless, not Docker) — only needed for local Postgres; the app itself is a single Next.js project with no other services
 
+## Local Postgres
+
+`compose.yml` defines one service — **`db`** (`postgres:16`, exposed on `localhost:5432`, with a named volume `divvy_db` so data survives restarts). It's the only containerized piece; the app itself runs directly on the host via `npm run dev`.
+
+```
+podman-compose up -d     # start Postgres
+podman-compose down      # stop (keeps data — add -v to wipe the volume)
+```
+
 ## First-time setup (clone → running app)
 
 ```bash
@@ -33,8 +42,7 @@ npm run dev                     # Next.js on http://localhost:3000
 Open http://localhost:3000.
 
 > **Note:** `prisma migrate dev` does not always regenerate the Prisma Client, so
-> run `npm run prisma:generate` after every migration. If the dev server seems to
-> serve old code after an edit, see the "stale code" section in the README.
+> run `npm run prisma:generate` after every migration.
 
 ## Environment variables
 
@@ -58,12 +66,18 @@ pooled string is the only one the running app should ever use.
 
 | Task | Command |
 | --- | --- |
-| New migration after editing `schema.prisma` | `npm run prisma:migrate` then `npm run prisma:generate` |
+| Run the app with hot reload (Turbopack) | `npm run dev` |
+| Compile for production (`prisma generate` then `next build` — re-run here since Vercel caches `node_modules`) | `npm run build` |
+| Run the production build | `npm start` |
+| Lint | `npm run lint` |
+| New migration after editing `schema.prisma` (local Podman Postgres) | `npm run prisma:migrate` then `npm run prisma:generate` |
+| Apply existing migrations without prompting — for production, run by hand against Supabase's **direct** (5432) connection string, never in the Vercel build | `npm run prisma:deploy` |
+| Regenerate the Prisma Client after schema changes (also runs automatically via `postinstall`) | `npm run prisma:generate` |
 | Inspect the DB in a browser GUI | `npx prisma studio` (http://localhost:5555) |
 | Inspect the DB via raw SQL | `podman exec -it divvy-app_db_1 psql -U divvy` |
-| Run unit tests | `npm test` |
+| Run unit tests once (`lib/settle.test.ts`) | `npm test` |
+| Run the unit suite in watch mode | `npm run test:watch` |
 | Run the HTTP integration suite (needs `npm run dev` running) | `npm run test:integration` |
-| Compile for production | `npm run build` |
 | Stop Postgres (keeps data) | `podman-compose down` (add `-v` to wipe the volume) |
 
 ## Git conventions
@@ -72,8 +86,12 @@ pooled string is the only one the running app should ever use.
 - **Commit messages**: short imperative subject describing the user-facing change
   (matches the existing history, e.g. *"Added settlement capability and payment
   method options"*).
-- Run `git status` before resuming work — the README's "what's uncommitted" notes
-  go stale quickly, so trust the working tree, not the doc.
+- **Single root-level `.gitignore`** — covers `node_modules/`, `dist/`, `.env`/`.env.*`,
+  `.DS_Store`; the whole repo is one Node/TS project.
+- **Remote** — [github.com/ryansabandal/divvy-app](https://github.com/ryansabandal/divvy-app)
+  (private).
+- Run `git status` before resuming work — don't trust stale "uncommitted work" notes
+  in any doc, this one included; the working tree is the source of truth.
 
 ## Code conventions
 
