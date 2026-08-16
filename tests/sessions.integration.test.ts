@@ -8,11 +8,24 @@
 // Requires: Postgres up (podman-compose up -d) and the API running (npm run dev).
 // Run with:  npm run test:integration
 
+import "dotenv/config";
 import { describe, it, expect } from "vitest";
 
 // Which server to test. Defaults to the Next.js dev server; override via TEST_BASE_URL to point
 // at a Vercel preview/production URL instead.
 const BASE_URL = process.env.TEST_BASE_URL ?? "http://localhost:3000";
+
+// Whether this run has Supabase Storage configured — read from the same .env the server under
+// test loads (via "dotenv/config" above). Without these, the QR routes error out at the real
+// Supabase client call, so that suite skips itself rather than failing on a fresh clone that
+// has no Storage keys yet. Skipped tests still show up as "skipped" in vitest's output, so this
+// isn't a silent pass.
+const STORAGE_CONFIGURED = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_STORAGE_BUCKET,
+);
+if (!STORAGE_CONFIGURED) {
+  console.warn("Skipping QR upload integration tests — SUPABASE_* env vars not set.");
+}
 
 // One small wrapper around fetch so every test reads as "call this path, get back status + body".
 // Returns the parsed body, or null for empty responses (DELETE returns 204 with no body).
@@ -87,6 +100,7 @@ describe("POST /api/sessions", () => {
         "name",
         "payment_details",
         "payment_method_type",
+        "qr_code_url",
       ]);
     }
   });
@@ -220,6 +234,7 @@ describe("POST /api/sessions/:sessionId/participants", () => {
       "name",
       "payment_details",
       "payment_method_type",
+      "qr_code_url",
     ]);
   });
 
@@ -1464,3 +1479,189 @@ describe("PATCH /api/sessions/:sessionId/settlements/:settlementId — mark paid
     expect(status).toBe(400);
   });
 });
+
+// These three routes proxy real Supabase Storage (see lib/storage.ts) — no mocking, since the
+// signed-URL flow and the bucket's MIME/path enforcement are exactly what needs to be proven end
+// to end. Gated by STORAGE_CONFIGURED (above) so a fresh clone without Storage keys still passes.
+describe.skipIf(!STORAGE_CONFIGURED)(
+  "POST /api/sessions/:sessionId/participants/:participantId/qr — mint upload URL",
+  () => {
+    it("mints a signed upload URL scoped to this session", async () => {
+      const session = await createSessionWithParticipants(1);
+      const participant = session.participants[0];
+
+      const { status, body } = await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        { method: "POST" },
+      );
+
+      expect(status).toBe(200);
+      // The path always lives under this session's folder — see qrObjectPrefix()
+      expect(body.path).toContain(`qr/${session.id}/`);
+      expect(body.signed_url).toMatch(/^https?:\/\//);
+    });
+
+    it("returns 404 for a participant that belongs to a different session", async () => {
+      const sessionA = await createSessionWithParticipants(1);
+      const sessionB = await createSessionWithParticipants(1);
+      const participantFromB = sessionB.participants[0];
+
+      const { status } = await api(
+        `/api/sessions/${sessionA.id}/participants/${participantFromB.id}/qr`,
+        { method: "POST" },
+      );
+
+      expect(status).toBe(404);
+    });
+
+    it("returns 404 (not 500) for a malformed session id", async () => {
+      const { status, body } = await api(
+        "/api/sessions/not-a-uuid/participants/00000000-0000-4000-8000-000000000000/qr",
+        { method: "POST" },
+      );
+      expect(status).toBe(404);
+      expect(body.error).toBe("session not found");
+    });
+  },
+);
+
+describe.skipIf(!STORAGE_CONFIGURED)(
+  "PUT /api/sessions/:sessionId/participants/:participantId/qr — persist after upload",
+  () => {
+    it("rejects a path outside this session's prefix", async () => {
+      // The one genuinely new attack surface in this feature (see route.ts): a caller can't mint
+      // a URL for their own session, then point at an arbitrary object path elsewhere.
+      const session = await createSessionWithParticipants(1);
+      const participant = session.participants[0];
+
+      const { status, body } = await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ path: "qr/00000000-0000-4000-8000-000000000000/x.jpg" }),
+        },
+      );
+
+      expect(status).toBe(400);
+      expect(body.error).toBe("path is not scoped to this session");
+    });
+
+    it("returns 404 when the participant doesn't belong to this session", async () => {
+      const sessionA = await createSessionWithParticipants(1);
+      const sessionB = await createSessionWithParticipants(1);
+      const participantFromB = sessionB.participants[0];
+
+      // A path correctly scoped to sessionA (minted for its own participant) — the point of
+      // this test is the participant lookup, not the prefix check, so the path must already
+      // pass that check for the 404 to isolate the right thing. Hand-building "qr/<id>/x.jpg"
+      // would fail the prefix check whenever SUPABASE_STORAGE_PREFIX is non-empty (e.g. "dev/"
+      // locally), which caught this exact bug when this test was first written.
+      const minted = await api(
+        `/api/sessions/${sessionA.id}/participants/${sessionA.participants[0].id}/qr`,
+        { method: "POST" },
+      );
+
+      const { status } = await api(
+        `/api/sessions/${sessionA.id}/participants/${participantFromB.id}/qr`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ path: minted.body.path }),
+        },
+      );
+
+      expect(status).toBe(404);
+    });
+
+    it("persists the object path and surfaces qr_code_url on the next GET", async () => {
+      const session = await createSessionWithParticipants(1);
+      const participant = session.participants[0];
+
+      const minted = await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        { method: "POST" },
+      );
+      // Real upload to the real signed URL — plain fetch, no supabase-js, mirroring the browser's
+      // own upload call (see A.4's smoke test finding in the plan file)
+      const uploadRes = await fetch(minted.body.signed_url, {
+        method: "PUT",
+        headers: { "content-type": "image/jpeg" },
+        body: new Blob([new Uint8Array([1, 2, 3, 4])]),
+      });
+      expect(uploadRes.ok).toBe(true);
+
+      const { status, body } = await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        { method: "PUT", body: JSON.stringify({ path: minted.body.path }) },
+      );
+      expect(status).toBe(200);
+      expect(body.qr_code_url).toContain(minted.body.path);
+
+      const after = await api(`/api/sessions/${session.id}`);
+      const afterParticipant = after.body.participants.find((p: any) => p.id === participant.id);
+      expect(afterParticipant.qr_code_url).toBe(body.qr_code_url);
+
+      // Clean up the real Storage object rather than leaving test data in the bucket forever
+      await api(`/api/sessions/${session.id}/participants/${participant.id}/qr`, { method: "DELETE" });
+    });
+  },
+);
+
+describe.skipIf(!STORAGE_CONFIGURED)(
+  "DELETE /api/sessions/:sessionId/participants/:participantId/qr — remove",
+  () => {
+    it("clears qr_object_path back to null and deletes the Storage object", async () => {
+      const session = await createSessionWithParticipants(1);
+      const participant = session.participants[0];
+
+      const minted = await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        { method: "POST" },
+      );
+      await fetch(minted.body.signed_url, {
+        method: "PUT",
+        headers: { "content-type": "image/jpeg" },
+        body: new Blob([new Uint8Array([1, 2, 3, 4])]),
+      });
+      await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        { method: "PUT", body: JSON.stringify({ path: minted.body.path }) },
+      );
+
+      const del = await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        { method: "DELETE" },
+      );
+      expect(del.status).toBe(204);
+
+      const after = await api(`/api/sessions/${session.id}`);
+      const afterParticipant = after.body.participants.find((p: any) => p.id === participant.id);
+      expect(afterParticipant.qr_code_url).toBeNull();
+    });
+
+    it("returns 404 when the participant has no QR code to remove", async () => {
+      const session = await createSessionWithParticipants(1);
+      const participant = session.participants[0];
+
+      const { status, body } = await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        { method: "DELETE" },
+      );
+
+      expect(status).toBe(404);
+      expect(body.error).toBe("participant has no QR code to remove");
+    });
+
+    it("returns 404 when the participant doesn't belong to this session", async () => {
+      const sessionA = await createSessionWithParticipants(1);
+      const sessionB = await createSessionWithParticipants(1);
+      const participantFromB = sessionB.participants[0];
+
+      const { status } = await api(
+        `/api/sessions/${sessionA.id}/participants/${participantFromB.id}/qr`,
+        { method: "DELETE" },
+      );
+
+      expect(status).toBe(404);
+    });
+  },
+);
