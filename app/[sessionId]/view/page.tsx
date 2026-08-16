@@ -44,7 +44,14 @@ export default function ViewPage() {
       <div className="w-full max-w-sm">
         <h1 className="heading-title text-3xl text-navy mb-4">{session.name}</h1>
 
-        {/* The old "{n} people" subtitle lived here; that fact is now a tile in the summary */}
+        {/* Stale-plan warning shown above the summary tiles, not just above the progress bar:
+            once expenses change post-finalize, SessionSummary's live "Total bill" and
+            SettlementProgress's frozen "transferred" total can disagree (even invert), so the
+            reader needs this context before either number, not after. */}
+        {frozen && stale && (
+          <StalePlanBanner>Ask the session organiser to recalculate.</StalePlanBanner>
+        )}
+
         <SessionSummary
           expenses={session.expenses}
           participantCount={session.participants.length}
@@ -98,11 +105,6 @@ export default function ViewPage() {
             <>
               {/* Progress bar shows how much of the plan has been paid, without any controls to change it */}
               <SettlementProgress settlements={settlements} frozen={frozen} />
-
-              {/* Stale-plan warning: no Recalculate here — direct the participant to the organiser */}
-              {frozen && stale && (
-                <StalePlanBanner>Ask the session organiser to recalculate.</StalePlanBanner>
-              )}
 
               <ul className="flex flex-col gap-3">
                 {settlements.map((s) => {

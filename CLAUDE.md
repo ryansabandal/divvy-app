@@ -50,6 +50,7 @@ divvy-app/
 ├── components/
 │   ├── ExpenseBreakdown.tsx                  # collapsible per-person charge list, shared by the settle + view pages
 │   ├── PaymentAction.tsx                     # payment-method label/display/copy, shared by the settle + view pages
+│   ├── SessionSummary.tsx                    # bento-tile totals (bill, people, avg/person), shared by the session/settle/view pages
 │   ├── SettlementProgress.tsx                # progress bar (incl. ARIA), shared by the settle + view pages
 │   └── StalePlanBanner.tsx                   # "expenses changed since finalizing" warning, shared by the settle + view pages
 ├── schemas/
@@ -154,7 +155,7 @@ enum PaymentMethodType {
 - [x] Display each participant's GCash/Maya number or bank account on the settle screen with a copy button so the payer can initiate the transfer themselves inside the relevant app
 - [x] Shareable read-only session link (`/[sessionId]/view`) — expense breakdown + settlement plan, no edit controls; "Share view link" button on the session page copies the URL to clipboard
 - [x] Return to a past session without login — home page shows a device-local "Your recent sessions" list (`lib/recentSessions.ts`, backed by `localStorage`, newest-first, capped at 10); "Copy session link" button on the session page for cross-device return (chosen over a raw sessionId copy/paste flow — a 36-char UUID is error-prone to hand-copy and the app already has a better container for it: the URL)
-- [x] Design pass — navy/teal/sky-blue/beige/white palette; sticky navy header with Divvy wordmark; Tailwind v4 with plain CSS component classes (no `@apply` — Turbopack bypasses PostCSS, so `@apply` is never processed)
+- [x] Design pass — forest/sage/cream/warm-cream palette (refreshed 2026-08-15 from the original navy/teal/sky-blue/beige/white — token *names* unchanged, only values; see CHANGELOG.md), Instrument Serif for user-supplied titles, bento-tile summary; sticky header with Divvy wordmark; Tailwind v4 with plain CSS component classes (no `@apply` — Turbopack bypasses PostCSS, so `@apply` is never processed)
 
 ## Out of Scope for V1
 

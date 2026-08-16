@@ -19,13 +19,16 @@ export function SettlementProgress({
 
   return (
     <div className="mb-6">
+      {/* aria-valuetext is kept word-for-word in sync with the visible <p> below — screen-reader
+          equivalence is the whole point of this attribute (backlog ticket 11), so the two strings
+          change together or not at all. */}
       <div
         role="progressbar"
         aria-label="Settlement progress"
         aria-valuenow={paidSettlements.length}
         aria-valuemin={0}
         aria-valuemax={settlements.length}
-        aria-valuetext={`${paidSettlements.length} of ${settlements.length} paid, ₱${paidAmount.toFixed(2)} of ₱${totalAmount.toFixed(2)}`}
+        aria-valuetext={`${paidSettlements.length} of ${settlements.length} payments settled, ₱${paidAmount.toFixed(2)} of ₱${totalAmount.toFixed(2)} transferred`}
         className="h-2 w-full rounded-full bg-navy/10"
       >
         <div
@@ -33,9 +36,12 @@ export function SettlementProgress({
           style={{ width: `${progressPct}%` }}
         />
       </div>
+      {/* "payments settled" / "transferred" rather than a bare "paid" — this line sits directly
+          under the summary's "Total bill" tile, and ₱X-of-₱Y here is money that changes hands
+          after netting, always ≤ the bill. Naming both keeps them from reading as a discrepancy. */}
       <p className="mt-1.5 text-xs text-navy/50">
-        {paidSettlements.length} of {settlements.length} paid · ₱{paidAmount.toFixed(2)} of ₱
-        {totalAmount.toFixed(2)}
+        {paidSettlements.length} of {settlements.length} payments settled · ₱
+        {paidAmount.toFixed(2)} of ₱{totalAmount.toFixed(2)} transferred
       </p>
     </div>
   );

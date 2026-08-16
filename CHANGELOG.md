@@ -3,10 +3,10 @@
 Dated record of what changed, why, and how it was verified — migration phases, hardening audits, and V2 planning notes. For current architecture, see [README.md](README.md); for product scope, see [CLAUDE.md](CLAUDE.md); for local setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 > **Current priority — finish the design refresh (2026-08-15, in progress, uncommitted):**
-> 1. **UI tuning** — palette/type/spacing adjustments on the forest-cream refresh below. One open question already logged: the settle screen now shows "Total spent" directly above "₱X of ₱Y paid", two legitimately different figures that sit close enough to read as a discrepancy.
-> 2. **Three-lens code review** — `correctness-reviewer` / `security-reviewer` / `best-practice-reviewer`, per CLAUDE.md. Not yet run on this change.
+> 1. **UI tuning** — done. Palette/type/spacing on the forest-cream refresh; the "Total spent" vs. "₱X of ₱Y paid" discrepancy-read was fixed by relabeling to "Total bill" / "payments settled ... transferred"; a mixed-font heading-accent treatment (italic serif word inside a bold-sans heading) was tried, then dropped after rendering showed it read as inconsistent rather than editorial.
+> 2. **Three-lens code review** — done. `correctness-reviewer` came back clean on security; correctness found one Low (a stale finalized plan can show a "transferred" total exceeding "Total bill" — fixed by moving `StalePlanBanner` above the summary tiles, not just above the progress bar); best-practice found two confirmed nits (this block being stale, and a `--color-sky`/`.bento-tile-cream` naming mismatch, renamed to `.bento-tile-accent`) plus one plausible note — all fixed.
 >
-> Then docs + commit. Working plan: `.scratch/plans/design-refresh-forest-cream.md` (gitignored, local-only).
+> Left: docs (README/CLAUDE.md/memory) + commit — see `.scratch/design-refresh-forest-cream/issues/02-docs-and-memory-update.md` and `03-stage-and-commit.md`. Working plan: `.scratch/plans/design-refresh-forest-cream.md` (gitignored, local-only).
 >
 > **After that, V2 resumes** at its real next step: provision **Supabase Storage** (one bucket, folder-prefixed by feature + session id, public read — see [CLAUDE.md](CLAUDE.md#v2-file-uploads--locked-constraints)). Nothing is provisioned yet, and it's the shared prerequisite blocking all three V2 features. Then ship **QR Ph upload** first — smallest complete slice, no new external provider. Full sequencing under [V2](#v2-scoped-2026-07-26-groundwork-started-2026-08-15) below.
 

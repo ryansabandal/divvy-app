@@ -97,12 +97,20 @@ export default function SettlePage() {
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <h1 className="text-3xl font-bold text-navy mb-1">
-          Settle <span className="heading-accent">up</span>
-        </h1>
+        <h1 className="text-3xl font-bold text-navy mb-1">Settle up</h1>
         <p className="text-sm text-navy/50 mb-4">
           {frozen ? "Track who's paid back" : "Who owes who, with the fewest payments"}
         </p>
+
+        {/* Stale-plan warning shown above the summary tiles, not just above the progress bar:
+            once expenses change post-finalize, SessionSummary's live "Total bill" and
+            SettlementProgress's frozen "transferred" total can disagree (even invert), so the
+            reader needs this context before either number, not after. */}
+        {frozen && stale && (
+          <StalePlanBanner>
+            Hit <strong>Recalculate</strong> to update.
+          </StalePlanBanner>
+        )}
 
         {/* Guarded on `session` — this page renders as soon as the settlements fetch resolves,
             while the session fetch (which carries expenses) may still be in flight */}
@@ -121,13 +129,6 @@ export default function SettlePage() {
           <>
             {/* Progress bar: how much of the frozen plan has actually been paid back */}
             <SettlementProgress settlements={settlements} frozen={frozen} />
-
-            {/* Stale-plan warning: shown when expenses changed after the plan was finalized */}
-            {frozen && stale && (
-              <StalePlanBanner>
-                Hit <strong>Recalculate</strong> to update.
-              </StalePlanBanner>
-            )}
 
             <ul className="flex flex-col gap-3">
               {settlements.map((s) => (

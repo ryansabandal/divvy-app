@@ -12,13 +12,13 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Editorial serif used only for heading accents (see .heading-accent / .heading-title in
-// globals.css). Non-variable single-weight family, so `weight` is required — omitting it
-// is a build-time error, not a silent fallback. Italic must be requested explicitly.
+// Editorial serif used only for user-supplied titles (see .heading-title in globals.css),
+// always upright. Non-variable single-weight family, so `weight` is required — omitting it
+// is a build-time error, not a silent fallback.
 const instrumentSerif = Instrument_Serif({
   variable: "--font-instrument-serif",
   weight: "400",
-  style: ["normal", "italic"],
+  style: ["normal"],
   subsets: ["latin"],
   display: "swap",
 });

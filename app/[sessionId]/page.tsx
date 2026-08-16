@@ -479,7 +479,6 @@ export default function SessionPage() {
             so font-bold would synthesise a fake bold rather than load a real one */}
         <h1 className="heading-title text-3xl text-navy mb-4">{session.name}</h1>
 
-        {/* The old "{n} people" subtitle lived here; that fact is now a tile in the summary */}
         <SessionSummary
           expenses={session.expenses}
           participantCount={session.participants.length}

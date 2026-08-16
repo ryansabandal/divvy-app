@@ -19,25 +19,30 @@ export function SessionSummary({
   expenses: Expense[];
   participantCount: number;
 }) {
-  // "Total spent" is the sum of what was actually PAID (expense.amount), not the sum of
+  // "Total bill" is the sum of what was actually PAID (expense.amount), not the sum of
   // ExpenseSplit.amount_owed. The two are not guaranteed equal: the CUSTOM-split guard only
   // enforces agreement to within RECONCILED_EPSILON (half a centavo) per expense, so across a
   // session those sums can drift by cents. expense.amount is the figure a human can check
   // against an actual receipt, so it's the honest one to put on screen.
-  const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalBill = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   // Derived from the total, not averaged from splits — averaging splits would compound the
   // same per-expense drift described above. Guard against a session with no participants.
-  const perPerson = participantCount > 0 ? totalSpent / participantCount : 0;
+  const perPerson = participantCount > 0 ? totalBill / participantCount : 0;
 
   return (
     <div className="bento-grid mb-8">
+      {/* Labelled "Total bill", not "Total spent". On the settle page this tile sits directly
+          above <SettlementProgress>, whose "₱X of ₱Y" is a smaller, legitimately different
+          number — what still has to change hands after netting people off against each other.
+          Two unexplained peso figures stacked in a money app read as a contradiction, so both
+          labels name what they measure: the whole bill here, transfers there. */}
       <div className="bento-tile bento-tile-dark bento-tile-wide">
-        <span className="bento-value">₱{formatPeso(totalSpent)}</span>
-        <span className="bento-label">Total spent</span>
+        <span className="bento-value">₱{formatPeso(totalBill)}</span>
+        <span className="bento-label">Total bill</span>
       </div>
 
-      <div className="bento-tile bento-tile-cream">
+      <div className="bento-tile bento-tile-accent">
         <span className="bento-value">{participantCount}</span>
         <span className="bento-label">{participantCount === 1 ? "Person" : "People"}</span>
       </div>

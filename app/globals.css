@@ -142,20 +142,13 @@ body {
 .input:focus { outline: none; box-shadow: 0 0 0 2px var(--color-teal-40); }
 
 /* ─── Heading serif ─────────────────────────────────────────────────────────
-   Instrument Serif, used sparingly for editorial contrast against Geist Sans.
-   Two variants, deliberately distinct:
-     .heading-accent — italic, for ONE static word inside a sans heading
-                       ("New /session/"). This is the brand voice.
-     .heading-title  — upright, for user-supplied titles (a session name).
-                       Not italic: an arbitrary name like "Bar tab 3/14" reads
-                       badly slanted, and italicising someone's typed text
-                       implies an emphasis they didn't ask for.
+   Instrument Serif, used for user-supplied titles (a session name) only.
+   Upright, not italic: an arbitrary name like "Bar tab 3/14" reads badly
+   slanted, and italicising someone's typed text implies an emphasis they
+   didn't ask for. An earlier version also mixed an italic accent word into
+   static sans headings ("New /session/") — dropped because splitting one
+   heading across two families/weights read as inconsistent, not editorial.
    Never applied to body copy, labels, or numbers. */
-.heading-accent {
-  font-family: var(--font-instrument-serif), Georgia, serif;
-  font-style: italic;
-  font-weight: 400;
-}
 .heading-title {
   font-family: var(--font-instrument-serif), Georgia, serif;
   font-weight: 400;
@@ -184,7 +177,9 @@ body {
 
 /* Dark + cream variants, mirroring the mixed-surface grid this design borrows from */
 .bento-tile-dark  { border-color: transparent; background-color: var(--color-navy); }
-.bento-tile-cream { border-color: transparent; background-color: var(--color-sky); }
+/* Named "-accent", not after the rendered color, to match --color-sky's documented role
+   ("accent tile surface") rather than compound the token's own historical name/color mismatch */
+.bento-tile-accent { border-color: transparent; background-color: var(--color-sky); }
 
 /* The number itself — tabular figures so digits don't jitter between renders
    (amounts update live as expenses are added/edited) */
