@@ -2,13 +2,9 @@
 
 Dated record of what changed, why, and how it was verified — migration phases, hardening audits, and V2 planning notes. For current architecture, see [README.md](README.md); for product scope, see [CLAUDE.md](CLAUDE.md); for local setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-> **Current priority — finish the design refresh (2026-08-15, in progress, uncommitted):**
-> 1. **UI tuning** — done. Palette/type/spacing on the forest-cream refresh; the "Total spent" vs. "₱X of ₱Y paid" discrepancy-read was fixed by relabeling to "Total bill" / "payments settled ... transferred"; a mixed-font heading-accent treatment (italic serif word inside a bold-sans heading) was tried, then dropped after rendering showed it read as inconsistent rather than editorial.
-> 2. **Three-lens code review** — done. `correctness-reviewer` came back clean on security; correctness found one Low (a stale finalized plan can show a "transferred" total exceeding "Total bill" — fixed by moving `StalePlanBanner` above the summary tiles, not just above the progress bar); best-practice found two confirmed nits (this block being stale, and a `--color-sky`/`.bento-tile-cream` naming mismatch, renamed to `.bento-tile-accent`) plus one plausible note — all fixed.
+> **Current priority — V2 resumes** at its real next step: provision **Supabase Storage** (one bucket, folder-prefixed by feature + session id, public read — see [CLAUDE.md](CLAUDE.md#v2-file-uploads--locked-constraints)). Nothing is provisioned yet, and it's the shared prerequisite blocking all three V2 features. Then ship **QR Ph upload** first — smallest complete slice, no new external provider. Full sequencing under [V2](#v2-scoped-2026-07-26-groundwork-started-2026-08-15) below.
 >
-> Left: docs (README/CLAUDE.md/memory) + commit — see `.scratch/design-refresh-forest-cream/issues/02-docs-and-memory-update.md` and `03-stage-and-commit.md`. Working plan: `.scratch/plans/design-refresh-forest-cream.md` (gitignored, local-only).
->
-> **After that, V2 resumes** at its real next step: provision **Supabase Storage** (one bucket, folder-prefixed by feature + session id, public read — see [CLAUDE.md](CLAUDE.md#v2-file-uploads--locked-constraints)). Nothing is provisioned yet, and it's the shared prerequisite blocking all three V2 features. Then ship **QR Ph upload** first — smallest complete slice, no new external provider. Full sequencing under [V2](#v2-scoped-2026-07-26-groundwork-started-2026-08-15) below.
+> The forest-cream design refresh (palette, Instrument Serif, bento summary tiles) closed 2026-08-16 — UI tuning, 3-lens review (security clean; one Low correctness fix, three best-practice nits, all fixed), and docs all done, committed as `a04f901`. Detail in `.scratch/design-refresh-forest-cream/issues/`.
 
 V1 is feature-complete, deployed, and **formally closed** (2026-07-19). The **serverless migration** off Railway is also **complete** (2026-07-26, phases 0 through F below), and its post-migration backlog (Phase 5) is fully closed. V2 groundwork (shared settlement UI components, tickets 04/11) closed 2026-08-15. What's left is the deferred V2 trio, gated on Storage setup above.
 
