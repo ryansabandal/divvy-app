@@ -174,7 +174,7 @@ enum PaymentMethodType {
 All three deferred V2 features (QR Ph upload, receipt OCR, proof-of-payment screenshots) need file storage. These constraints were researched against current platform docs on 2026-07-26 and are **settled** — they're properties of the stack, not preferences to re-litigate. Status, shipping order, and the still-open product questions live in [CHANGELOG.md](CHANGELOG.md), not here.
 
 - **Uploads never proxy through a Route Handler.** Vercel Functions cap every request/response body at 4.5 MB on every plan, which a phone photo exceeds. Use Supabase signed direct-upload URLs: the client uploads straight to Storage, and the Route Handler only mints a short-lived token.
-- **No Supabase Auth — use a server-side gatekeeper.** Prisma connects directly to Postgres, bypassing PostgREST and RLS, so Storage's usual `auth.uid()`-based policies don't apply. The Route Handler authorizes the request via Prisma, then uses the Storage service-role key to issue the signed URL. Don't stand up Supabase Auth just for uploads.
+- **No Supabase Auth — use a server-side gatekeeper.** Prisma connects directly to Postgres, so *our* requests never travel through PostgREST and Storage's usual `auth.uid()`-based policies don't apply. **This means PostgREST is bypassed by us, not closed to everyone else** — it is a separate, internet-facing door onto the same database, and securing it is a separate job. See [Database security posture](#database-security-posture); the gap that phrasing once hid caused a real exposure, closed 2026-08-21. The Route Handler authorizes the request via Prisma, then uses the Storage service-role key to issue the signed URL. Don't stand up Supabase Auth just for uploads.
 - **Storage layout:** one bucket, folder-prefixed by feature + session id, public read — the same "anyone with the session link" trust model the app already applies to names, phone numbers, and expense amounts. File attachments don't warrant a stricter standard than the data they sit next to.
 - **OCR output is never auto-committed.** A mandatory human review + per-item participant-assignment step sits between parsed output and any persisted `Expense`/`ExpenseSplit` row. The reviewed result saves as an ordinary `CUSTOM` split — no new `SplitType`.
 
@@ -235,6 +235,21 @@ All routes live under `app/api/sessions/**` as Next.js Route Handlers (see the P
 | GitHub   | Source control + Actions (weekly Supabase keepalive cron) | Free |
 
 Everything runs from the repo root — a single Vercel project, no separate backend deploy. `DATABASE_URL` is set per-environment in the Vercel dashboard, pointed at Supabase's pooled (6543, `?pgbouncer=true`) connection string; the direct (5432) string is used only for one-off CLI migrations, never in a deployed environment. See [README.md](README.md) for the full migration history and current architecture.
+
+## Database security posture
+
+Settled 2026-08-21 after a confirmed exposure — every table was readable *and writable* by anyone holding the published anon key. Full incident detail in [CHANGELOG.md](CHANGELOG.md). These are properties of the stack, not preferences.
+
+- **RLS is enabled on every table in `public`, with deliberately zero policies.** Deny-by-default. Nothing should ever reach these tables through PostgREST, so there is no policy to write.
+- **Zero policies doesn't lock the app out, because of owner-bypass.** Postgres exempts a table's owner from RLS, and Prisma connects as `postgres`, which owns all tables. **Never set `FORCE ROW LEVEL SECURITY`** — that strips the exemption and the app would start returning empty arrays with a `200`, which is the worst failure mode available: no error, anywhere.
+- **`anon` and `authenticated` hold no grants**, and `ALTER DEFAULT PRIVILEGES FOR ROLE postgres` keeps it that way for tables created later. This is the load-bearing half: Postgres has no "default RLS", so every future table needs its own `ENABLE ROW LEVEL SECURITY` statement, which relies on nobody forgetting.
+- **Convention:** any future migration that creates a table must append its own `ENABLE ROW LEVEL SECURITY`.
+- **`service_role` deliberately keeps its access.** It carries `BYPASSRLS`, so none of this ever protected against a leaked service key; revoking would close no real hole while removing a legitimate admin path.
+- **Guard every grant statement with `to_regrole()`.** Local dev (`compose.yml`, `POSTGRES_USER: divvy`) has none of `anon`, `authenticated`, or even `postgres`. There is no `REVOKE ... IF EXISTS`, so an unguarded statement aborts the whole migration locally and in the shadow database. Corollary: a local run **cannot** prove the revoke works — it no-ops. Verify in production.
+- **PostgREST config, complementary to the above:** `public` is not an exposed schema, and "Automatically expose new tables" is **off** (Integrations → Data API → Settings). Config-only and silently reversible, which is why the migration exists too.
+- **Expect 6 INFO `rls_enabled_no_policy` advisor findings.** That is the correct end state. **Do not clear them by adding a permissive policy.**
+- **Ports are not interchangeable.** Runtime uses the pooled `6543` string with `?pgbouncer=true` (a Prisma flag — `psql` rejects it). Migrations must use `5432` session mode: the migrate engine takes a session-scoped `pg_advisory_lock`, which transaction pooling would lose.
+- **Vercel injects environment variables at build time.** Changing `DATABASE_URL` in the dashboard does nothing until a redeploy — this caused a 5-day production outage. Vercel also never runs `migrate deploy`; schema migrations are always applied by hand before the code that needs them ships.
 
 ## Design Principles
 
