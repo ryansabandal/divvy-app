@@ -35,6 +35,13 @@ export const updateSettlementSchema = z.object({
   paid: z.boolean(),
 });
 
+// Schema for PUT /api/sessions/:sessionId/participants/:participantId/qr — persists the object
+// path after the client's direct-to-Storage upload succeeds. The route itself (not this schema)
+// checks the path is actually scoped to this session — see qrObjectPrefix().
+export const setQrObjectPathSchema = z.object({
+  path: z.string().min(1, "path is required"),
+});
+
 // Schema for PATCH /api/sessions/:sessionId/expenses (bulk reorder)
 export const reorderExpensesSchema = z.object({
   expense_ids: z.array(z.string()).max(50, "expense_ids must be 50 or fewer"),

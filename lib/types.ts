@@ -10,6 +10,7 @@ export interface Participant {
   name: string;
   payment_method_type: PaymentMethodType | null;
   payment_details: string | null;
+  qr_code_url: string | null;
 }
 
 export interface ExpenseSplit {

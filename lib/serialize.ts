@@ -5,6 +5,7 @@
 // pages import — so if a future edit here stopped matching what a page expects, tsc would catch it
 // at build time instead of the drift surfacing later as a page-only type (see lib/types.ts header).
 import type { Participant, ExpenseSplit, Expense, Settlement, PaymentMethodType, SplitType } from "./types";
+import { publicObjectUrl } from "./storageUrl";
 
 // Shared shape for a Participant as it appears nested inside other rows (payer, split.participant)
 type ParticipantLike = {
@@ -12,16 +13,20 @@ type ParticipantLike = {
   name: string;
   payment_method_type: PaymentMethodType | null;
   payment_details: string | null;
+  qr_object_path: string | null;
 };
 
 // Shape a Participant row for the API response — drops sort_order (an internal list-ordering
-// mechanism) and created_at (never read by the frontend)
+// mechanism), created_at (never read by the frontend), and the raw qr_object_path (the response
+// exposes a ready-to-use URL instead, derived here rather than stored, so a bucket rename is a
+// config change rather than a data migration)
 export function serializeParticipant(p: ParticipantLike): Participant {
   return {
     id: p.id,
     name: p.name,
     payment_method_type: p.payment_method_type,
     payment_details: p.payment_details,
+    qr_code_url: p.qr_object_path ? publicObjectUrl(p.qr_object_path) : null,
   };
 }
 

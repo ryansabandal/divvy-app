@@ -20,29 +20,36 @@ model Session {
 
 // A person in a session who can pay for or owe a share of expenses
 model Participant {
-  id                  String              @id @default(uuid())
+  id                  String             @id @default(uuid())
   session_id          String
   name                String
   // Self-entered later via the shared session link, so both are nullable
   payment_method_type PaymentMethodType?
   payment_details     String?
-  created_at          DateTime            @default(now())
+  // Supabase Storage object path for an uploaded QR code, e.g. "qr/<sessionId>/<uuid>.jpg"; null
+  // when none uploaded. One shared slot, not one per payment method — confirmed by the user that a
+  // GCash-generated QR scans fine in a bank app (BPI), consistent with QR Ph's interoperability.
+  // Stores the path, not the public URL — publicObjectUrl() derives the URL at serialize time, so
+  // a bucket rename is a config change, not a data migration. Supplements
+  // payment_method_type/payment_details, never replaces them.
+  qr_object_path      String?
+  created_at          DateTime           @default(now())
   // A monotonic insert sequence, used only to keep participant lists in a stable order.
   // created_at can't do this alone: Postgres's now() returns the *transaction* start time, so
   // participants created together in one nested write (the common case) would tie — and an
   // UPDATE (e.g. setting a payment method) can otherwise make Postgres return rows in a
   // different physical order than before.
-  sort_order          Int                 @default(autoincrement())
+  sort_order          Int                @default(autoincrement())
   // RESTRICT (Prisma's default), unlike Settlement.session below: this blocks deleting a Session
   // that still has participants. No route deletes a Session today, so it's latent — but if one
   // ever does, it should fail loudly here rather than orphan/cascade-wipe a person's data.
-  session             Session             @relation(fields: [session_id], references: [id])
+  session             Session            @relation(fields: [session_id], references: [id])
   expenses            Expense[]
   splits              ExpenseSplit[]
   // debtor/creditor deliberately don't cascade either: no route deletes a Participant today, and
   // if one ever does, a loud FK error beats silently vanishing one side of a payment plan
-  owes                Settlement[]        @relation("Debtor")
-  owed                Settlement[]        @relation("Creditor")
+  owes                Settlement[]       @relation("Debtor")
+  owed                Settlement[]       @relation("Creditor")
 }
 
 // A single expense logged against a session, paid by one participant
