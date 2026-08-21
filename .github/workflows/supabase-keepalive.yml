@@ -22,4 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Hit /api/health to keep the Supabase project active
-        run: curl --fail https://divvy-app-zeta.vercel.app/api/health
+        # --fail-with-body (not --fail): the 2026-08-21 outage returned an empty body by design
+        # (see app/api/health/route.ts), but a future failure mode may not, so surface whatever
+        # comes back instead of discarding it. --max-time caps a hung connection. --retry absorbs
+        # a single transient network blip so one flaky run doesn't produce a red run that trains
+        # us to ignore red runs — which is the actual failure mode the 2026-08-21 postmortem found.
+        run: >
+          curl --fail-with-body --max-time 30 --retry 2 --retry-delay 10
+          https://divvy-app-zeta.vercel.app/api/health
