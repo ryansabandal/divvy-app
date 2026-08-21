@@ -50,6 +50,9 @@ model Participant {
   // if one ever does, a loud FK error beats silently vanishing one side of a payment plan
   owes                Settlement[]       @relation("Debtor")
   owed                Settlement[]       @relation("Creditor")
+
+  // Covers the session -> participants lookup FK; Postgres doesn't auto-index FK columns
+  @@index([session_id])
 }
 
 // A single expense logged against a session, paid by one participant
@@ -69,6 +72,10 @@ model Expense {
   session     Session        @relation(fields: [session_id], references: [id])
   payer       Participant    @relation(fields: [paid_by], references: [id])
   splits      ExpenseSplit[]
+
+  // Covers the session -> expenses and payer -> expenses FKs
+  @@index([session_id])
+  @@index([paid_by])
 }
 
 // How much of a given expense one participant owes
@@ -81,6 +88,10 @@ model ExpenseSplit {
   units          Int?
   expense        Expense     @relation(fields: [expense_id], references: [id], onDelete: Cascade)
   participant    Participant @relation(fields: [participant_id], references: [id])
+
+  // Covers the expense -> splits and participant -> splits FKs
+  @@index([expense_id])
+  @@index([participant_id])
 }
 
 // A frozen, simplified payment from one participant to another; persisted when the
@@ -102,6 +113,11 @@ model Settlement {
   session    Session     @relation(fields: [session_id], references: [id], onDelete: Cascade)
   debtor     Participant @relation("Debtor", fields: [from_id], references: [id])
   creditor   Participant @relation("Creditor", fields: [to_id], references: [id])
+
+  // Covers the session -> settlements, debtor -> settlements, and creditor -> settlements FKs
+  @@index([session_id])
+  @@index([from_id])
+  @@index([to_id])
 }
 
 // How an expense is divided: equally, by manual amounts, or by units consumed
