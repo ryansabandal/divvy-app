@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Low
 Category: Best-Practice
 
@@ -14,3 +14,5 @@ Location: app/[sessionId]/page.tsx:621, :647 (comment); app/[sessionId]/page.tsx
 Fix sketch: add the one-line "why" comment to the value reset; remove the dead guard (the real invariant already lives in the JSX conditional gating the Save button).
 
 Found by: best-practice-reviewer, Phase G.2 review (2026-08-16).
+
+Resolved 2026-08-22: both nits fixed as sketched. Re-reviewed clean by a scoped correctness-reviewer subagent, which confirmed the removed guard was genuinely unreachable (single call site, gated by the same `activeTab !== "QR"` condition, no form ancestor for an implicit-submit path).

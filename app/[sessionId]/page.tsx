@@ -203,7 +203,10 @@ export default function SessionPage() {
       return;
     }
     setExpandedParticipantId(p.id);
-    setActiveTab(p.payment_method_type || "GCASH");
+    // A participant with only a QR code (no phone/bank method) has payment_method_type === null —
+    // without this fallback the form silently opened on GCash with an empty field, even though the
+    // collapsed row correctly showed "QR code ✓"
+    setActiveTab(p.payment_method_type || (p.qr_code_url ? "QR" : "GCASH"));
     setPaymentMethodError(null);
 
     // Bank transfer is stored as "Bank Name - Account Number" — split into the two separate fields
@@ -222,7 +225,6 @@ export default function SessionPage() {
   // persists on its own via handleQrUpload/handleQrRemove below.
   async function handleSavePaymentMethod(participantId: string) {
     setPaymentMethodError(null);
-    if (activeTab === "QR") return; // defensive; the Save button isn't rendered on this tab
 
     // Bank transfer needs two fields; GCash/Maya just need the phone number
     let details: string;
@@ -618,6 +620,9 @@ export default function SessionPage() {
                                 className="hidden"
                                 onChange={(e) => {
                                   const file = e.target.files?.[0];
+                                  // Resets the input so picking the same file again still fires
+                                  // onChange — without this, re-selecting an identical filename
+                                  // silently does nothing on most browsers
                                   e.target.value = "";
                                   if (file) handleQrUpload(p.id, file);
                                 }}
@@ -644,6 +649,9 @@ export default function SessionPage() {
                             className="hidden"
                             onChange={(e) => {
                               const file = e.target.files?.[0];
+                              // Resets the input so picking the same file again still fires
+                              // onChange — without this, re-selecting an identical filename
+                              // silently does nothing on most browsers
                               e.target.value = "";
                               if (file) handleQrUpload(p.id, file);
                             }}

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireValidSessionId } from "@/lib/validation";
-import { createQrUploadUrl, deleteStorageObject, qrObjectPrefix } from "@/lib/storage";
+import { createQrUploadUrl, deleteStorageObjectBestEffort, qrObjectPrefix } from "@/lib/storage";
 import { publicObjectUrl } from "@/lib/storageUrl";
 import { setQrObjectPathSchema } from "@/schemas/sessions";
 import { parseBody } from "@/lib/requestBody";
@@ -60,13 +60,22 @@ export async function PUT(
     return NextResponse.json({ error: "participant not found in this session" }, { status: 404 });
   }
 
-  // Replacing an existing QR: delete the old object so it doesn't sit in Storage forever counting
-  // against the free-tier cap. A failure here isn't fatal to the request — the new path still wins.
-  if (participant.qr_object_path) {
-    await deleteStorageObject(participant.qr_object_path);
-  }
+  const previousPath = participant.qr_object_path;
 
+  // Persist first, so the new path wins unconditionally regardless of what happens to the old
+  // object below.
   await prisma.participant.update({ where: { id: participantId }, data: { qr_object_path: path } });
+
+  // Best-effort cleanup of the replaced object, so it doesn't sit in Storage forever counting
+  // against the free-tier cap. Skip entirely when the path is unchanged — a retried PUT (network
+  // timeout, browser retry) pointing at the same path would otherwise delete the very object the
+  // row now references. deleteStorageObjectBestEffort never throws and gives up after its own
+  // timeout, so a delete failure — or a hang — adds at most that bound to this response and can
+  // never turn an already-successful persist into an error; an orphaned object is the accepted
+  // failure mode (CLAUDE.md's V2 constraints).
+  if (previousPath && previousPath !== path) {
+    await deleteStorageObjectBestEffort(previousPath);
+  }
 
   return NextResponse.json({ qr_code_url: publicObjectUrl(path) });
 }
@@ -88,8 +97,12 @@ export async function DELETE(
     return NextResponse.json({ error: "participant has no QR code to remove" }, { status: 404 });
   }
 
-  await deleteStorageObject(participant.qr_object_path);
+  const previousPath = participant.qr_object_path;
+
+  // Same ordering as PUT above (ticket 02): clear the row first so it wins unconditionally, then
+  // best-effort delete the object — never blocks or fails this response.
   await prisma.participant.update({ where: { id: participantId }, data: { qr_object_path: null } });
+  await deleteStorageObjectBestEffort(previousPath);
 
   return new NextResponse(null, { status: 204 });
 }

@@ -27,6 +27,12 @@ export async function compressImage(file: File): Promise<Blob> {
 
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Couldn't process that image on this device");
+    // A fresh canvas is transparent, and JPEG has no alpha channel — without an explicit fill, a
+    // transparent-background QR (PNG/WebP both allow one) composites against a browser-determined
+    // backdrop, commonly black, which makes the dark QR modules unscannable. Nothing downstream
+    // catches this: upload succeeds and the thumbnail renders fine, so fill white unconditionally.
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY));

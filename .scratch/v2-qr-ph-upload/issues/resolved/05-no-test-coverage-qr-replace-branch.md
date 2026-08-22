@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Low
 Category: Correctness
 
@@ -13,3 +13,5 @@ Fix sketch: add a test that uploads+persists a QR, then uploads+persists a secon
 Note: this ticket should be picked up alongside ticket 02, since fixing 02 will change what this test needs to assert.
 
 Found by: correctness-reviewer, Phase G.2 review (2026-08-16).
+
+Resolved 2026-08-22, alongside ticket 02 as noted above. Added two tests using the ticket-15 `uploadQrForParticipant` helper: one confirms a full replace (new object live, old object actually gone from Storage — note Supabase Storage's missing-object response is HTTP 400 with `{code: "NoSuchKey"}` in the body, not a clean 404, confirmed by probing the live endpoint directly), one pins the same-path-replay regression (object survives a retried PUT). Both pass against real Storage.

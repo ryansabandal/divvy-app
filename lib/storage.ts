@@ -44,3 +44,21 @@ export async function deleteStorageObject(path: string): Promise<void> {
   const { error } = await bucket.remove([path]);
   if (error) throw error;
 }
+
+// Best-effort delete: never throws, and gives up after timeoutMs so a hung Storage call can't
+// block a caller's HTTP response beyond that bound. Used by the QR replace/remove routes, where
+// the object being deleted is already unreferenced by the DB row — an orphaned object is the
+// accepted failure mode (see CLAUDE.md's V2 constraints), but an unbounded response time is not.
+export async function deleteStorageObjectBestEffort(path: string, timeoutMs = 8000): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Storage delete timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  try {
+    await Promise.race([deleteStorageObject(path), timeout]);
+  } catch (err) {
+    console.error("Best-effort Storage delete failed", path, err);
+  } finally {
+    clearTimeout(timer);
+  }
+}

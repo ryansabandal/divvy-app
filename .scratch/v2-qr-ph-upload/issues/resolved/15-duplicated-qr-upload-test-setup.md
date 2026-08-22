@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Low
 Category: Best-Practice
 
@@ -11,3 +11,5 @@ Location: tests/sessions.integration.test.ts (PUT and DELETE `describe.skipIf(!S
 Fix sketch: extract a `uploadQrForParticipant(sessionId, participantId)` helper mirroring the existing `createEvenExpense` pattern. Pick this up alongside ticket 05, since the new replace-branch test will want the same helper.
 
 Found by: best-practice-reviewer, Phase G.2 review (2026-08-16).
+
+Resolved 2026-08-22, alongside tickets 02/05. Extracted `uploadQrForParticipant(sessionId, participantId)`, mirroring the existing `createEvenExpense` pattern; the PUT-persist test and the DELETE-clear test both use it now instead of repeating the mint/upload/persist sequence.

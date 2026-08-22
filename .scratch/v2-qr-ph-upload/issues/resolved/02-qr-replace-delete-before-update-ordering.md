@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Medium
 Category: Correctness
 
@@ -14,3 +14,9 @@ Location: app/api/sessions/[sessionId]/participants/[participantId]/qr/route.ts:
 Fix sketch: persist the new path first (`prisma.participant.update`), then attempt to delete the old object in a try/catch (log and ignore failure — it's already an accepted orphan risk per CLAUDE.md), and skip the delete entirely when `path === participant.qr_object_path`.
 
 Found by: correctness-reviewer, Phase G.2 review (2026-08-16).
+
+Resolved 2026-08-22: applied the fix sketch (persist-first, skip-on-same-path, best-effort delete), then re-reviewed by parallel correctness + security subagents on the diff. Security review: no findings. Correctness review: no blocking findings, but 2 Low/plausible follow-ups, both fixed in the same pass:
+1. The original try/catch could still block the response indefinitely on a *hung* (not thrown) Storage delete. Fixed by extracting `deleteStorageObjectBestEffort(path, timeoutMs = 8000)` in `lib/storage.ts` — swallows all errors and gives up after a bounded timeout via `Promise.race`, so a hang adds at most that bound to the response instead of blocking it indefinitely.
+2. `DELETE`'s handler (untouched by the original fix) still deleted-before-updated, now inconsistent with `PUT`'s corrected ordering. Reordered `DELETE` to match: clear the row first, then best-effort-delete via the same helper.
+A third point — no test exercises the try/catch/timeout wrapper itself (removing it wouldn't fail any test) — was left as an accepted gap: forcing a real Storage error or hang without mocking isn't practical, and this suite's QR tests are deliberately real-Storage-only, no mocking.
+Verified: 91/91 integration tests pass (including the new ticket-05 replace/replay tests) against real Supabase Storage.

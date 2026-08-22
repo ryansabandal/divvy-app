@@ -1480,6 +1480,29 @@ describe("PATCH /api/sessions/:sessionId/settlements/:settlementId — mark paid
   });
 });
 
+// Mint a signed upload URL, PUT real bytes to it, then persist the path — the full sequence every
+// QR test needs before it can assert on replace/remove behavior. Returns the persisted path so
+// callers can assert against it (e.g. that a specific object survived or was deleted).
+async function uploadQrForParticipant(sessionId: string, participantId: string): Promise<string> {
+  const minted = await api(`/api/sessions/${sessionId}/participants/${participantId}/qr`, { method: "POST" });
+  expect(minted.status).toBe(200);
+
+  const uploadRes = await fetch(minted.body.signed_url, {
+    method: "PUT",
+    headers: { "content-type": "image/jpeg" },
+    body: new Blob([new Uint8Array([1, 2, 3, 4])]),
+  });
+  expect(uploadRes.ok).toBe(true);
+
+  const persisted = await api(`/api/sessions/${sessionId}/participants/${participantId}/qr`, {
+    method: "PUT",
+    body: JSON.stringify({ path: minted.body.path }),
+  });
+  expect(persisted.status).toBe(200);
+
+  return minted.body.path;
+}
+
 // These three routes proxy real Supabase Storage (see lib/storage.ts) — no mocking, since the
 // signed-URL flow and the bucket's MIME/path enforcement are exactly what needs to be proven end
 // to end. Gated by STORAGE_CONFIGURED (above) so a fresh clone without Storage keys still passes.
@@ -1576,31 +1599,67 @@ describe.skipIf(!STORAGE_CONFIGURED)(
       const session = await createSessionWithParticipants(1);
       const participant = session.participants[0];
 
-      const minted = await api(
-        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
-        { method: "POST" },
-      );
-      // Real upload to the real signed URL — plain fetch, no supabase-js, mirroring the browser's
-      // own upload call (see A.4's smoke test finding in the plan file)
-      const uploadRes = await fetch(minted.body.signed_url, {
-        method: "PUT",
-        headers: { "content-type": "image/jpeg" },
-        body: new Blob([new Uint8Array([1, 2, 3, 4])]),
-      });
-      expect(uploadRes.ok).toBe(true);
-
-      const { status, body } = await api(
-        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
-        { method: "PUT", body: JSON.stringify({ path: minted.body.path }) },
-      );
-      expect(status).toBe(200);
-      expect(body.qr_code_url).toContain(minted.body.path);
+      const path = await uploadQrForParticipant(session.id, participant.id);
 
       const after = await api(`/api/sessions/${session.id}`);
       const afterParticipant = after.body.participants.find((p: any) => p.id === participant.id);
-      expect(afterParticipant.qr_code_url).toBe(body.qr_code_url);
+      expect(afterParticipant.qr_code_url).toContain(path);
 
       // Clean up the real Storage object rather than leaving test data in the bucket forever
+      await api(`/api/sessions/${session.id}/participants/${participant.id}/qr`, { method: "DELETE" });
+    });
+
+    // Regression coverage for ticket 02: every test above starts from qr_object_path === null, so
+    // the replace branch (an existing QR being swapped for a new one) was never exercised.
+    it("replaces an existing QR: new object wins, old object is actually deleted", async () => {
+      const session = await createSessionWithParticipants(1);
+      const participant = session.participants[0];
+
+      const firstPath = await uploadQrForParticipant(session.id, participant.id);
+      const secondPath = await uploadQrForParticipant(session.id, participant.id);
+      expect(secondPath).not.toBe(firstPath);
+
+      const after = await api(`/api/sessions/${session.id}`);
+      const afterParticipant = after.body.participants.find((p: any) => p.id === participant.id);
+      expect(afterParticipant.qr_code_url).toContain(secondPath);
+
+      // The old object should be gone from Storage, not just unreferenced — a public-bucket GET
+      // for its path should now report "not found" rather than still serving the replaced image.
+      // Supabase Storage's public object endpoint has a real quirk here: a missing object comes
+      // back as HTTP 400 (not 404), with the semantic status buried in the JSON body instead —
+      // confirmed by probing the live endpoint directly, not assumed.
+      const oldObjectUrl: string = afterParticipant.qr_code_url.replace(secondPath, firstPath);
+      const oldObjectRes = await fetch(oldObjectUrl);
+      const oldObjectBody = await oldObjectRes.json();
+      expect(oldObjectRes.status).toBe(400);
+      expect(oldObjectBody.code).toBe("NoSuchKey");
+
+      await api(`/api/sessions/${session.id}/participants/${participant.id}/qr`, { method: "DELETE" });
+    });
+
+    it("same-path replay (retried PUT) leaves the object intact instead of deleting it", async () => {
+      // Regression pin for ticket 02's second bug: the old delete-before-update ordering deleted
+      // the live object whenever a PUT retried with the same path (e.g. a browser retry after a
+      // timeout whose original request actually succeeded server-side).
+      const session = await createSessionWithParticipants(1);
+      const participant = session.participants[0];
+
+      const path = await uploadQrForParticipant(session.id, participant.id);
+
+      const replay = await api(
+        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
+        { method: "PUT", body: JSON.stringify({ path }) },
+      );
+      expect(replay.status).toBe(200);
+
+      const after = await api(`/api/sessions/${session.id}`);
+      const afterParticipant = after.body.participants.find((p: any) => p.id === participant.id);
+      expect(afterParticipant.qr_code_url).toContain(path);
+
+      // The object itself must still be fetchable — the replay must not have deleted it
+      const objectRes = await fetch(afterParticipant.qr_code_url);
+      expect(objectRes.status).toBe(200);
+
       await api(`/api/sessions/${session.id}/participants/${participant.id}/qr`, { method: "DELETE" });
     });
   },
@@ -1613,19 +1672,7 @@ describe.skipIf(!STORAGE_CONFIGURED)(
       const session = await createSessionWithParticipants(1);
       const participant = session.participants[0];
 
-      const minted = await api(
-        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
-        { method: "POST" },
-      );
-      await fetch(minted.body.signed_url, {
-        method: "PUT",
-        headers: { "content-type": "image/jpeg" },
-        body: new Blob([new Uint8Array([1, 2, 3, 4])]),
-      });
-      await api(
-        `/api/sessions/${session.id}/participants/${participant.id}/qr`,
-        { method: "PUT", body: JSON.stringify({ path: minted.body.path }) },
-      );
+      await uploadQrForParticipant(session.id, participant.id);
 
       const del = await api(
         `/api/sessions/${session.id}/participants/${participant.id}/qr`,
