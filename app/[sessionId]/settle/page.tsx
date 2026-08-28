@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
+import { deriveSessionPayer } from "@/lib/sessionPayer";
 import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
 import { PaymentAction } from "@/components/PaymentAction";
 import { SessionSummary } from "@/components/SessionSummary";
+import { SessionPayerNote } from "@/components/SessionPayerNote";
 import { SettlementProgress } from "@/components/SettlementProgress";
 import { StalePlanBanner } from "@/components/StalePlanBanner";
 import type { Session, SettlementsResponse } from "@/lib/types";
@@ -43,6 +45,9 @@ export default function SettlePage() {
 
   const { frozen, stale, settlements } = data;
   const participantsById = new Map((session?.participants ?? []).map((p) => [p.id, p]));
+  // Non-null only when every expense shares one payer (see lib/sessionPayer.ts) — session may
+  // still be loading (its own independent SWR fetch), so this is null until it resolves too.
+  const derivedSessionPayer = session ? deriveSessionPayer(session.expenses) : null;
 
   // Freeze the live preview into trackable rows. Expenses stay editable afterward — Recalculate
   // (below) is how later edits get folded back in, at the cost of resetting paid progress.
@@ -118,6 +123,7 @@ export default function SettlePage() {
           <SessionSummary
             expenses={session.expenses}
             participantCount={session.participants.length}
+            payerName={derivedSessionPayer?.name}
           />
         )}
 
@@ -129,6 +135,11 @@ export default function SettlePage() {
           <>
             {/* Progress bar: how much of the frozen plan has actually been paid back */}
             <SettlementProgress settlements={settlements} frozen={frozen} />
+
+            {/* Named once here instead of repeating "· X paid" on every charge line below —
+                only true once every expense shares one payer; a mixed session falls back to
+                the per-line payer name inside each row's breakdown instead */}
+            <SessionPayerNote payer={derivedSessionPayer} />
 
             <ul className="flex flex-col gap-3">
               {settlements.map((s) => (
@@ -168,6 +179,7 @@ export default function SettlePage() {
                       personName={s.from_name}
                       breakdown={buildParticipantBreakdown(s.from_id, session.expenses)}
                       rowAmount={s.amount}
+                      hidePayerName={!!derivedSessionPayer}
                     />
                   )}
                 </li>
