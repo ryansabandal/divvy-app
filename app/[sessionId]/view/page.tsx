@@ -3,10 +3,12 @@
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
+import { deriveSessionPayer } from "@/lib/sessionPayer";
 import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
 import { PaymentAction } from "@/components/PaymentAction";
 import { SessionSummary } from "@/components/SessionSummary";
+import { SessionPayerNote } from "@/components/SessionPayerNote";
 import { SettlementProgress } from "@/components/SettlementProgress";
 import { StalePlanBanner } from "@/components/StalePlanBanner";
 import type { Session, SettlementsResponse } from "@/lib/types";
@@ -38,6 +40,10 @@ export default function ViewPage() {
   const { frozen, stale, settlements } = settlementsData;
   // Used to look up each creditor's payment method when rendering settlement rows
   const participantsById = new Map(session.participants.map((p) => [p.id, p]));
+  // Non-null only when every expense shares one payer — see lib/sessionPayer.ts. Drives whether
+  // the payer is stated once under the heading or repeated per row, on this page and below in
+  // the settlement breakdown, matching what the session (edit) page shows.
+  const derivedSessionPayer = deriveSessionPayer(session.expenses);
 
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8">
@@ -55,11 +61,15 @@ export default function ViewPage() {
         <SessionSummary
           expenses={session.expenses}
           participantCount={session.participants.length}
+          payerName={derivedSessionPayer?.name}
         />
 
         {/* Expenses — read-only; same card layout as the session page minus the delete button */}
         <section className="mb-8">
           <h2 className="section-label">Expenses</h2>
+          {/* Named once here instead of on every card below — only true once every expense
+              shares one payer; a mixed session falls back to naming the payer per row */}
+          <SessionPayerNote payer={derivedSessionPayer} className="-mt-2 mb-3 text-sm text-navy/40" />
           {session.expenses.length === 0 ? (
             <p className="text-sm text-navy/40">No expenses yet.</p>
           ) : (
@@ -71,7 +81,7 @@ export default function ViewPage() {
                     <span className="font-semibold text-white">₱{e.amount.toFixed(2)}</span>
                   </div>
                   <p className="mt-1 text-sm text-white/60">
-                    Paid by {e.payer.name} ·{" "}
+                    {!derivedSessionPayer && <>Paid by {e.payer.name} · </>}
                     {e.split_type === "EVEN"
                       ? "split evenly"
                       : e.split_type === "QUANTITY" && e.quantity
@@ -135,6 +145,7 @@ export default function ViewPage() {
                         personName={s.from_name}
                         breakdown={buildParticipantBreakdown(s.from_id, session.expenses)}
                         rowAmount={s.amount}
+                        hidePayerName={!!derivedSessionPayer}
                       />
                     </li>
                   );

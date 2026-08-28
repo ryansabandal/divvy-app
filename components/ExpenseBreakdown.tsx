@@ -14,10 +14,17 @@ export function ExpenseBreakdown({
   personName,
   breakdown,
   rowAmount,
+  hidePayerName = false,
 }: {
   personName: string;
   breakdown: ParticipantBreakdown;
   rowAmount: number;
+  // True once every expense in the session shares one payer (see lib/sessionPayer.ts) — that
+  // payer is already named once elsewhere on the page, so repeating "· X paid" on every charge
+  // line would be pure noise. Defaults to false (today's behaviour) so a caller that doesn't pass
+  // it — and a mixed-payer session, where a charge's payer can genuinely vary line to line — is
+  // unaffected.
+  hidePayerName?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId(); // ties the toggle to its panel for screen readers
@@ -55,7 +62,7 @@ export function ExpenseBreakdown({
                 <span className="text-navy/70">
                   {c.description}
                   {c.units != null ? ` ×${c.units}` : ""}
-                  <span className="text-navy/40"> · {c.payerName} paid</span>
+                  {!hidePayerName && <span className="text-navy/40"> · {c.payerName} paid</span>}
                 </span>
                 <span className="shrink-0 text-navy">₱{c.amountOwed.toFixed(2)}</span>
               </li>

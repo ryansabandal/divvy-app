@@ -15,9 +15,19 @@ function formatPeso(amount: number) {
 export function SessionSummary({
   expenses,
   participantCount,
+  payerName,
+  onChangePayer,
 }: {
   expenses: Expense[];
   participantCount: number;
+  // Name of the single session-wide payer (see lib/sessionPayer.ts's deriveSessionPayer) — null
+  // for a mixed-payer session. When set, replaces the "Avg / person" tile: once total and people
+  // count are already two tiles, "who do I pay" is more actionable than the per-person average.
+  payerName?: string | null;
+  // Session (edit) page only: re-opens its session-payer picker, which otherwise collapses
+  // entirely once locked. Omitted by view/settle, which have no picker to reopen — so no
+  // "Change" link renders there even if payerName is set.
+  onChangePayer?: () => void;
 }) {
   // "Total bill" is the sum of what was actually PAID (expense.amount), not the sum of
   // ExpenseSplit.amount_owed. The two are not guaranteed equal: the CUSTOM-split guard only
@@ -47,10 +57,26 @@ export function SessionSummary({
         <span className="bento-label">{participantCount === 1 ? "Person" : "People"}</span>
       </div>
 
-      <div className="bento-tile">
-        <span className="bento-value">₱{formatPeso(perPerson)}</span>
-        <span className="bento-label">Avg / person</span>
-      </div>
+      {payerName ? (
+        <div className="bento-tile">
+          <span className="bento-value truncate">{payerName}</span>
+          <span className="bento-label">Paid by</span>
+          {onChangePayer && (
+            <button
+              type="button"
+              onClick={onChangePayer}
+              className="text-left text-xs font-medium text-teal underline"
+            >
+              Change
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="bento-tile">
+          <span className="bento-value">₱{formatPeso(perPerson)}</span>
+          <span className="bento-label">Avg / person</span>
+        </div>
+      )}
     </div>
   );
 }

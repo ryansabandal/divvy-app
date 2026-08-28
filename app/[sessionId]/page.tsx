@@ -22,10 +22,12 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { saveRecentSession } from "@/lib/recentSessions";
+import { deriveDefaultPayer, deriveSessionPayer } from "@/lib/sessionPayer";
 import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
 import { compressImage } from "@/lib/imageCompress";
 import { fetcher } from "@/lib/fetcher";
 import { SessionSummary } from "@/components/SessionSummary";
+import { SessionPayerNote } from "@/components/SessionPayerNote";
 import type { Participant, Expense, Session } from "@/lib/types";
 
 // One draggable expense card. Pulled out as its own component (rather than inlined in a .map())
@@ -35,11 +37,17 @@ function SortableExpenseCard({
   onEdit,
   onDelete,
   isDeleting,
+  hidePayerName,
 }: {
   expense: Expense;
   onEdit: (expense: Expense) => void;
   onDelete: (expenseId: string) => void;
   isDeleting: boolean;
+  // True once every expense in the session shares one payer — that payer is already named once
+  // under the section heading, so repeating it on every row would be pure noise. Any card whose
+  // expense happens to differ still needs its own "Paid by" (see the mixed-payer check below),
+  // but with a single session payer every card's payer necessarily matches it.
+  hidePayerName: boolean;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: expense.id,
@@ -88,7 +96,7 @@ function SortableExpenseCard({
         </div>
       </div>
       <p className="mt-1 text-sm text-white/60">
-        Paid by {expense.payer.name} ·{" "}
+        {!hidePayerName && <>Paid by {expense.payer.name} · </>}
         {expense.split_type === "EVEN"
           ? "split evenly"
           : expense.split_type === "QUANTITY" && expense.quantity
@@ -132,7 +140,21 @@ export default function SessionPage() {
   // Add-expense form state
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
-  const [paidBy, setPaidBy] = useState("");
+  // Who fronted the bill for this session, picked once near the participant list rather than
+  // per expense (the common case is a single payer for the whole night). null/"" means "not
+  // picked yet by the user" — the render-time default below fills it in without a setState effect.
+  const [sessionPayer, setSessionPayer] = useState("");
+  // Forces the session-payer picker open after "Change"; cleared on the next successful expense
+  // submit (see handleSubmitExpense), so sessionPayerLocked below goes back to being purely
+  // derived from recorded data — same reason it survives a page reload with no persistence of its own.
+  const [payerPickerForcedOpen, setPayerPickerForcedOpen] = useState(false);
+  // Per-expense override: null tracks the live session payer (correct in ADD mode). In EDIT mode
+  // it's always pinned to the expense's actual payer instead (see handleStartEdit) — leaving it
+  // null there would let the submitted paid_by drift if the session payer changes while the form
+  // stays open. Kept separate from sessionPayer so editing one expense can't rewrite the default
+  // for every future expense.
+  const [payerOverride, setPayerOverride] = useState<string | null>(null);
+  const [payerOverrideOpen, setPayerOverrideOpen] = useState(false);
   const [splitWith, setSplitWith] = useState<string[] | null>(null);
   const [splitType, setSplitType] = useState<"EVEN" | "CUSTOM" | "QUANTITY">("EVEN");
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
@@ -182,10 +204,27 @@ export default function SessionPage() {
   }
 
   // Defaults derived at render time (never via a setState in an effect): until the user picks a
-  // payer or unchecks someone, fall back to "first participant" and "everyone".
+  // payer or unchecks someone, fall back to a sensible inferred default and "everyone".
   const allParticipantIds = session.participants.map((p) => p.id);
-  const effectivePaidBy = paidBy || allParticipantIds[0] || "";
+  // Session-wide payer: the user's own pick, else whoever has fronted expenses most often so far
+  // (see lib/sessionPayer.ts — NOT unanimity, which would collapse to participant #1 the moment a
+  // single expense is overridden), else the first participant when there are no expenses yet.
+  const effectiveSessionPayer = sessionPayer || deriveDefaultPayer(session.expenses) || allParticipantIds[0] || "";
+  // What actually gets submitted for the expense currently in the form: a per-expense override
+  // if one is set, otherwise the session-wide payer.
+  const effectivePaidBy = payerOverride || effectiveSessionPayer;
   const effectiveSplitWith = splitWith ?? allParticipantIds;
+  // Non-null only when every expense shares one payer — drives whether expense rows repeat
+  // "Paid by X" on each card or state it once under the section heading instead.
+  const derivedSessionPayer = deriveSessionPayer(session.expenses);
+  // Locked/collapsed only when recorded expenses agree on one payer AND that payer matches the
+  // live sessionPayer pick — the second check catches the case where a new payer was picked but
+  // no expense recorded under them yet exists to back it up, which would otherwise show a payer
+  // on the tile that isn't who the next expense will actually be billed to.
+  const sessionPayerLocked =
+    !payerPickerForcedOpen &&
+    derivedSessionPayer !== null &&
+    (sessionPayer === "" || sessionPayer === derivedSessionPayer.id);
 
   // Toggle one participant in or out of the even split (seeding from the default when untouched)
   function toggleSplitWith(id: string) {
@@ -358,13 +397,16 @@ export default function SessionPage() {
     await mutate(); // reconciles with the server, or reverts the optimistic update on failure
   }
 
-  // Shared by "cancel edit" and "after a successful add/save" — back to blank, add-mode defaults
+  // Shared by "cancel edit" and "after a successful add/save" — back to blank, add-mode defaults.
+  // Clears the per-expense payer override, NOT the session-wide payer — otherwise one overridden
+  // expense would poison every expense added afterward in this form.
   function resetForm() {
     setEditingExpenseId(null);
     setFormError(null);
     setDescription("");
     setAmount("");
-    setPaidBy("");
+    setPayerOverride(null);
+    setPayerOverrideOpen(false);
     setSplitWith(null);
     setSplitType("EVEN");
     setCustomAmounts({});
@@ -379,7 +421,16 @@ export default function SessionPage() {
     setFormError(null);
     setDescription(expense.description);
     setAmount(String(expense.amount));
-    setPaidBy(expense.payer.id);
+    // Always PIN the override to this expense's actual payer for the duration of the edit —
+    // never null, even when it currently matches the session-wide payer. Leaving it null would
+    // make effectivePaidBy keep tracking effectiveSessionPayer live (a derived value that shifts
+    // with deriveDefaultPayer's most-frequent/most-recent heuristic), so deleting a DIFFERENT
+    // expense, drag-reordering the list, or touching the session-wide picker while this edit is
+    // still open could silently re-target this expense's paid_by on Save — corrupting who owes
+    // what with no visible cause. Only the disclosure's open/closed state depends on the
+    // session-payer comparison; the pinned value itself never does.
+    setPayerOverride(expense.payer.id);
+    setPayerOverrideOpen(expense.payer.id !== effectiveSessionPayer);
     setSplitType(expense.split_type);
     setSplitWith(expense.split_type === "EVEN" ? expense.splits.map((s) => s.participant_id) : null);
     setCustomAmounts(
@@ -532,6 +583,9 @@ export default function SessionPage() {
     // Back to blank, add-mode defaults, then tell SWR to refetch so the change appears
     resetForm();
     await mutate();
+    // Cleared after mutate() resolves (not before) so the picker/tile don't flicker for one
+    // round trip against stale pre-submit data.
+    setPayerPickerForcedOpen(false);
     setSubmitting(false);
   }
 
@@ -549,11 +603,42 @@ export default function SessionPage() {
         <SessionSummary
           expenses={session.expenses}
           participantCount={session.participants.length}
+          // Matches sessionPayerLocked exactly, so this tile and the picker's open/closed state
+          // can never disagree; falls back to Avg/person (undefined) whenever the picker is open.
+          // view/page.tsx and settle/page.tsx have no picker, so they always show the payer as
+          // soon as recorded expenses agree.
+          payerName={sessionPayerLocked ? derivedSessionPayer?.name : undefined}
+          onChangePayer={() => setPayerPickerForcedOpen(true)}
         />
 
         {/* Participants — tap a row to set that person's payment method for the settle screen */}
         <section className="mb-8">
           <h2 className="section-label">Who&apos;s splitting</h2>
+
+          {/* Set once for the whole session, since the common case is one person fronting the
+              whole bill. Collapses on its own once submitting an expense locks in the payer (see
+              sessionPayerLocked/payerPickerForcedOpen above) — the summary tile's "Change" link
+              reopens it. */}
+          {!sessionPayerLocked && (
+            <>
+              <label htmlFor="session-payer" className="mb-1.5 block text-sm font-medium text-navy">
+                Who&apos;s fronting the bill?
+              </label>
+              <select
+                id="session-payer"
+                value={effectiveSessionPayer}
+                onChange={(e) => setSessionPayer(e.target.value)}
+                className="input mb-4"
+              >
+                {session.participants.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+
           <ul className="flex flex-col gap-2">
             {session.participants.map((p) => (
               <li key={p.id}>
@@ -710,6 +795,9 @@ export default function SessionPage() {
         {/* Expenses */}
         <section>
           <h2 className="section-label">Expenses</h2>
+          {/* Named once here instead of on every card below — only true once every expense
+              shares one payer; a mixed session falls back to naming the payer per row */}
+          <SessionPayerNote payer={derivedSessionPayer} className="-mt-2 mb-3 text-sm text-navy/40" />
           {deleteError && <p className="mb-2 text-sm text-red-500">{deleteError}</p>}
           {reorderError && <p className="mb-2 text-sm text-red-500">{reorderError}</p>}
           {session.expenses.length === 0 ? (
@@ -725,6 +813,7 @@ export default function SessionPage() {
                       onEdit={handleStartEdit}
                       onDelete={handleDeleteExpense}
                       isDeleting={deletingExpenseId === e.id}
+                      hidePayerName={!!derivedSessionPayer}
                     />
                   ))}
                 </ul>
@@ -760,18 +849,52 @@ export default function SessionPage() {
               className="input"
             />
 
-            <label className="text-sm font-medium text-navy">Paid by</label>
-            <select
-              value={effectivePaidBy}
-              onChange={(e) => setPaidBy(e.target.value)}
-              className="input"
-            >
-              {session.participants.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            {/* Collapsed by default — the session-wide payer picker above already covers the
+                common case, so this only expands when this one expense needs a different payer */}
+            {payerOverrideOpen ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="payer-override" className="text-sm font-medium text-navy">
+                    Paid by
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // EDIT mode pins to the concrete id (see handleStartEdit) rather than null,
+                      // which would resume tracking the live session payer until Save.
+                      setPayerOverride(editingExpenseId ? effectiveSessionPayer : null);
+                      setPayerOverrideOpen(false);
+                    }}
+                    className="text-sm font-medium text-navy/50"
+                  >
+                    Use {session.participants.find((p) => p.id === effectiveSessionPayer)?.name ?? "session payer"}
+                  </button>
+                </div>
+                <select
+                  id="payer-override"
+                  value={effectivePaidBy}
+                  onChange={(e) => setPayerOverride(e.target.value)}
+                  className="input"
+                >
+                  {session.participants.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <p className="text-sm text-navy/60">
+                Paid by {session.participants.find((p) => p.id === effectivePaidBy)?.name ?? "—"} ·{" "}
+                <button
+                  type="button"
+                  onClick={() => setPayerOverrideOpen(true)}
+                  className="font-medium text-teal underline"
+                >
+                  Change
+                </button>
+              </p>
+            )}
 
             {/* Toggle between the three split modes */}
             <div className="flex gap-2">
