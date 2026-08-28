@@ -13,3 +13,7 @@ Location: app/api/sessions/[sessionId]/participants/[participantId]/qr/route.ts:
 Fix sketch: validate the exact minted shape instead of a prefix — `new RegExp('^' + escapeRegex(qrObjectPrefix(sessionId)) + '[0-9a-f-]{36}\\.jpg$')`. The mint is the only legitimate producer of these paths and its output shape is fully known (lib/storage.ts:35), so nothing legitimate is rejected.
 
 Found by: security-reviewer, Phase G.2 review (2026-08-16).
+
+## Comments
+
+**2026-08-28, holistic review:** confirmed reachable as filed. `.scratch/holistic-review-2026-08-28/issues/02-qr-path-unbounded-length.md` applies the exact fix sketch above (regex against the minted shape) as the fix for an unbounded-length finding on the same field — implementing that ticket closes this one too, as a side effect, in the same edit. Not marking this resolved yet; leaving that for whoever implements the fix to confirm and flip.
