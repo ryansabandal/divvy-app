@@ -263,6 +263,24 @@ Settled 2026-08-21 after a confirmed exposure — every table was readable *and 
 - **Ports are not interchangeable.** Runtime uses the pooled `6543` string with `?pgbouncer=true` (a Prisma flag — `psql` rejects it). Migrations must use `5432` session mode: the migrate engine takes a session-scoped `pg_advisory_lock`, which transaction pooling would lose.
 - **Vercel injects environment variables at build time.** Changing `DATABASE_URL` in the dashboard does nothing until a redeploy — this caused a 5-day production outage. Vercel also never runs `migrate deploy`; schema migrations are always applied by hand before the code that needs them ships.
 
+## Data retention
+
+Sessions older than a month are deleted automatically, so old bill-splitting data doesn't accumulate indefinitely against the free tier's storage/egress ceiling (see [Deployment](#deployment)).
+
+- **Schema side (done, migration `20260828021955_participant_expense_cascade_on_session_delete`):** `Participant.session` and `Expense.session` now cascade on Session delete, matching `Settlement.session`'s existing cascade. Together the three make `DELETE FROM "Session"` a single-statement, fully cascading delete — previously `Participant`/`Expense` were RESTRICT by deliberate design (see the schema comments) on the reasoning that an *accidental* delete path should fail loudly; this cleanup job is that intentional path, so cascading is now correct rather than a workaround.
+- **Scheduling side is Supabase-side config, not a Prisma migration** — run once, directly against the Supabase SQL Editor:
+  ```sql
+  create extension if not exists pg_cron with schema pg_catalog;
+
+  select cron.schedule(
+    'monthly-session-cleanup',
+    '0 3 1 * *', -- 3 AM UTC on the 1st of each month
+    $$ delete from "Session" where created_at < now() - interval '1 month' $$
+  );
+  ```
+  Kept out of `prisma/migrations/` on purpose: local dev's `postgres:16` image (`compose.yml`) has no `pg_cron` extension compiled in at all — unlike the RLS grants above, there's no `to_regrole()`-style guard for a missing *extension*, so an unguarded `CREATE EXTENSION pg_cron` would abort every local migration and the shadow database Prisma uses for `migrate dev`. This mirrors the existing PostgREST-exposure setting above: config-only, applied by hand, not expected to exist locally.
+- To change the retention window or inspect/unschedule the job later: `select cron.alter_job(job_id, schedule := '...')` or `select cron.unschedule('monthly-session-cleanup')`, run in the same SQL Editor.
+
 ## Design Principles
 
 - Mobile-first (friends will use this on their phones via shared link)

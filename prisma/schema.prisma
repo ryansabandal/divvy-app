@@ -40,10 +40,11 @@ model Participant {
   // UPDATE (e.g. setting a payment method) can otherwise make Postgres return rows in a
   // different physical order than before.
   sort_order          Int                @default(autoincrement())
-  // RESTRICT (Prisma's default), unlike Settlement.session below: this blocks deleting a Session
-  // that still has participants. No route deletes a Session today, so it's latent — but if one
-  // ever does, it should fail loudly here rather than orphan/cascade-wipe a person's data.
-  session             Session            @relation(fields: [session_id], references: [id])
+  // Cascades on Session delete, same as Settlement.session below — needed for the pg_cron monthly
+  // cleanup job (see CLAUDE.md) to delete a Session in one statement. Previously RESTRICT, on the
+  // reasoning that an accidental delete path should fail loudly; now that a real delete path is
+  // intentional, cascading is the correct behavior rather than a workaround.
+  session             Session            @relation(fields: [session_id], references: [id], onDelete: Cascade)
   expenses            Expense[]
   splits              ExpenseSplit[]
   // debtor/creditor deliberately don't cascade either: no route deletes a Participant today, and
@@ -68,8 +69,8 @@ model Expense {
   // Monotonic insert sequence, same pattern as Participant.sort_order: keeps the expense list in
   // a stable order and lets users drag-reorder it, since insertion order alone isn't guaranteed
   sort_order  Int            @default(autoincrement())
-  // RESTRICT, same reasoning as Participant.session above: blocks deleting a Session with expenses
-  session     Session        @relation(fields: [session_id], references: [id])
+  // Cascades on Session delete, same reasoning as Participant.session above
+  session     Session        @relation(fields: [session_id], references: [id], onDelete: Cascade)
   payer       Participant    @relation(fields: [paid_by], references: [id])
   splits      ExpenseSplit[]
 
@@ -104,12 +105,11 @@ model Settlement {
   amount     Float
   // Whether this payment has actually been made; toggled from the settle screen
   paid       Boolean     @default(false)
-  // Cascades on Session delete, unlike Participant.session/Expense.session above (both RESTRICT) —
-  // those still block a session delete today, so this alone doesn't yet make Session deletable;
-  // it just keeps Settlement consistent with ExpenseSplit's existing cascade for whenever a
-  // delete route lands and needs an explicit order (splits -> expenses -> settlements -> ...).
-  // debtor/creditor deliberately don't cascade: no route deletes a Participant today, and if one
-  // ever does, a loud FK error beats silently vanishing one side of a payment plan.
+  // Cascades on Session delete, same as Participant.session/Expense.session above — together these
+  // three make `DELETE FROM "Session"` a single-statement, fully cascading delete, which the
+  // pg_cron monthly cleanup job (see CLAUDE.md) relies on.
+  // debtor/creditor deliberately don't cascade: no route deletes a Participant on its own today,
+  // and if one ever does, a loud FK error beats silently vanishing one side of a payment plan.
   session    Session     @relation(fields: [session_id], references: [id], onDelete: Cascade)
   debtor     Participant @relation("Debtor", fields: [from_id], references: [id])
   creditor   Participant @relation("Creditor", fields: [to_id], references: [id])
