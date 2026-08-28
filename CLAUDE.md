@@ -30,7 +30,7 @@ divvy-app/
 │           ├── route.ts                      # POST /api/sessions
 │           └── [sessionId]/
 │               ├── route.ts                  # GET /api/sessions/:sessionId
-│               ├── participants/[...]        # POST, PATCH :participantId
+│               ├── participants/[...]        # POST, PATCH :participantId, /:participantId/qr (POST/PUT/DELETE — QR upload)
 │               ├── expenses/[...]            # POST, PATCH (single + bulk reorder), DELETE
 │               └── settlements/[...]         # GET, POST, PATCH :settlementId
 ├── lib/
@@ -46,7 +46,10 @@ divvy-app/
 │   ├── settlementHelpers.ts                  # shared settlement-plan helpers
 │   ├── settle.ts                             # Debt simplification algorithm
 │   ├── settle.test.ts                        # Vitest unit tests, incl. regression coverage for the residual-cent fix
-│   └── validation.ts                         # requireValidSessionId() and friends
+│   ├── validation.ts                         # requireValidSessionId() and friends
+│   ├── imageCompress.ts                      # client-side <canvas> compression to JPEG before a QR upload
+│   ├── storage.ts                            # Supabase Storage service-role client — signed QR upload URLs, best-effort delete
+│   └── storageUrl.ts                         # publicObjectUrl() — deterministic public Storage URL from an object path
 ├── components/
 │   ├── ExpenseBreakdown.tsx                  # collapsible per-person charge list, shared by the settle + view pages
 │   ├── PaymentAction.tsx                     # payment-method label/display/copy, shared by the settle + view pages
@@ -164,14 +167,25 @@ enum PaymentMethodType {
 - Push notifications
 - Expense history across sessions
 - Multi-currency
-- Receipt photo upload + auto-parsing (OCR) — deferred to V2
-- QR Ph code upload for payment methods — the intended V2 end-state; GCash, Maya, and most bank apps can scan QR Ph so the payer just scans instead of copying a number. Deferred alongside OCR; both need file storage infrastructure this stack doesn't have yet, so solve that once for both
-- Proof-of-payment screenshot upload (for other participants to validate a payment) — deferred to V2 alongside OCR/QR upload, same missing file storage infrastructure
+- Receipt photo upload + auto-parsing (OCR) — deferred to V2, not started
+- Proof-of-payment screenshot upload (for other participants to validate a payment) — deferred to V2 alongside OCR, not started; same file-storage infrastructure QR Ph upload already uses (see below)
 - Settlement status indicator (checkmark/"Done" on a session in the recent-sessions list once its plan is finalized and fully paid) — idea only, not scheduled; the `Settlement.paid` data already exists, but the recent-sessions list is device-local (`localStorage`), so this needs a batch status endpoint rather than one request per listed session
+
+## QR Ph Code Upload — Shipped (added 2026-08-16, post-V1-close)
+
+The first of the deferred V2 trio (QR Ph upload, receipt OCR, proof-of-payment screenshots) to actually ship, once Supabase Storage groundwork existed for it. Receipt OCR and proof-of-payment screenshots are still not started — see "Out of Scope for V1" above.
+
+- Participant uploads a QR code (GCash's, Maya's, or any bank app's — not required to be QR Ph-badged) via a fourth "QR" tab alongside GCash/Maya/Bank Transfer in the payment-method editor on the session page.
+- **One shared slot**, not one per payment method (`Participant.qr_object_path`) — a GCash-generated QR scans fine in a bank app, consistent with QR Ph's interoperability. **Supplements, never replaces** the phone-number/account-number fields: a participant can have either, both, or neither, and the settle/view screens render whichever is present.
+- Client-side compression (`lib/imageCompress.ts`) before upload — canvas-drawn, capped at 1600px on the longest edge, re-exported as JPEG at 0.85 quality, with a white background fill first (a transparent QR would otherwise composite onto a black backdrop and become unscannable). This same canvas re-export incidentally produces a JPEG from HEIC input too, but only where the browser's own `<img>` can decode HEIC (most current iOS Safari versions can) — no dedicated HEIC-conversion dependency was added on a verify-first basis; if a browser hands over an undecodable HEIC file, the upload fails with a clear error instead of silently breaking.
+- Upload flow: `POST .../participants/:participantId/qr` mints a signed Supabase Storage upload URL, the browser PUTs the compressed image straight to Storage, then `PUT .../participants/:participantId/qr` persists the object path (best-effort deleting the replaced object, if any). `DELETE` clears it.
+- Displayed on the settle + read-only view screens via `components/PaymentAction.tsx`, tap-to-enlarge full-screen — a settle-row thumbnail is too small to actually scan.
+- This shipped implementation is a real-world instance of the "V2 File Uploads — Locked Constraints" below, not an exception to them — confirmed by reading `lib/storage.ts` and the `qr` route: signed direct-upload URLs, a server-side Prisma gatekeeper (no Supabase Auth), and public-read storage scoped by session folder.
+- Known open hardening items (a `capture="environment"` UX bug, a couple of security-hardening tickets) live under `.scratch/v2-qr-ph-upload/issues/` — current status in [CHANGELOG.md](CHANGELOG.md).
 
 ## V2 File Uploads — Locked Constraints
 
-All three deferred V2 features (QR Ph upload, receipt OCR, proof-of-payment screenshots) need file storage. These constraints were researched against current platform docs on 2026-07-26 and are **settled** — they're properties of the stack, not preferences to re-litigate. Status, shipping order, and the still-open product questions live in [CHANGELOG.md](CHANGELOG.md), not here.
+All three V2 file-upload features (QR Ph upload, receipt OCR, proof-of-payment screenshots) needed file storage — solve that once for all rather than piecemeal. QR Ph upload has since shipped (see above); receipt OCR and proof-of-payment screenshots are still deferred and still gated on these same constraints. These constraints were researched against current platform docs on 2026-07-26 and are **settled** — they're properties of the stack, not preferences to re-litigate. Status, shipping order, and the still-open product questions live in [CHANGELOG.md](CHANGELOG.md), not here.
 
 - **Uploads never proxy through a Route Handler.** Vercel Functions cap every request/response body at 4.5 MB on every plan, which a phone photo exceeds. Use Supabase signed direct-upload URLs: the client uploads straight to Storage, and the Route Handler only mints a short-lived token.
 - **No Supabase Auth — use a server-side gatekeeper.** Prisma connects directly to Postgres, so *our* requests never travel through PostgREST and Storage's usual `auth.uid()`-based policies don't apply. **This means PostgREST is bypassed by us, not closed to everyone else** — it is a separate, internet-facing door onto the same database, and securing it is a separate job. See [Database security posture](#database-security-posture); the gap that phrasing once hid caused a real exposure, closed 2026-08-21. The Route Handler authorizes the request via Prisma, then uses the Storage service-role key to issue the signed URL. Don't stand up Supabase Auth just for uploads.
@@ -197,16 +211,14 @@ This is the standard approach used by Splitwise. Implement in `lib/settle.ts`.
 
 Neither GCash nor Maya exposes a public deep-link URL that pre-fills a peer transfer — payments happen inside the authenticated app after the user is already logged in. Attempting to construct one (e.g. `gcash.me/<number>/<amount>`) produces a broken or useless link.
 
-**V1 approach (all three methods):** Show the payment detail with a label and a copy-to-clipboard button. The payer reads the amount from the settlement row, copies the number/account, and completes the transfer inside the relevant app themselves.
+**Copy-to-clipboard, all three method types:** show the payment detail with a label and a copy-to-clipboard button. The payer reads the amount from the settlement row, copies the number/account, and completes the transfer inside the relevant app themselves.
 
 - **GCash / Maya:** label is `GCash ·` or `Maya ·`; the full phone number is displayed and copied.
 - **Bank Transfer:** entry form accepts bank name and account number as two separate inputs; stored in `payment_details` as `"Bank Name - Account Number"`. On the settle screen the bank name is used as the label (e.g. `BPI ·`) and **only the account number is copied** — pasting the bank name alongside the account number would be confusing and serve no purpose.
 
-**V2 target — QR Ph codes:** QR Ph is the BSP-standardised interoperable payment QR standard. GCash and Maya both support it, and most bank apps can scan it too. The intended V2 flow is:
-1. Each participant uploads or generates their QR Ph code when entering their payment method.
-2. The settle screen displays the QR image directly so the payer can scan it in-app.
+**QR code (shipped 2026-08-16):** QR Ph is the BSP-standardised interoperable payment QR standard — GCash, Maya, and most bank apps can scan it — but any QR image a participant uploads works, not only QR Ph-badged ones. See "QR Ph Code Upload — Shipped" above for the full flow. It supplements the copy-to-clipboard option above rather than replacing it: the settle and read-only view screens render whichever the participant has set — QR, phone/account details, both, or neither.
 
-QR Ph code upload needs file-storage infrastructure (the same gap blocking receipt OCR and proof-of-payment screenshots), so all three will be solved together in V2. See the "Out of Scope for V1" section.
+Receipt OCR and proof-of-payment screenshot upload remain deferred — see "Out of Scope for V1" and "V2 File Uploads — Locked Constraints" above.
 
 ## API Routes
 

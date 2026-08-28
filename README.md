@@ -60,6 +60,7 @@ divvy-app/
 │               ├── route.ts                          # GET /api/sessions/:sessionId
 │               ├── participants/route.ts              # POST participant
 │               ├── participants/[participantId]/route.ts    # PATCH payment method
+│               ├── participants/[participantId]/qr/route.ts # POST mint signed upload URL, PUT persist object path, DELETE remove
 │               ├── expenses/route.ts                  # POST, PATCH (bulk reorder)
 │               ├── expenses/[expenseId]/route.ts       # PATCH (edit), DELETE
 │               ├── settlements/route.ts                # GET, POST
@@ -76,7 +77,10 @@ divvy-app/
 │   ├── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
 │   ├── paymentDetails.ts                 # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
 │   ├── fetcher.ts                        # shared SWR fetcher (generic error message parameterized per page)
-│   └── expenseBreakdown.ts               # buildParticipantBreakdown() — one person's charges; pure, no React
+│   ├── expenseBreakdown.ts               # buildParticipantBreakdown() — one person's charges; pure, no React
+│   ├── imageCompress.ts                  # client-side <canvas> compression to JPEG before a QR upload; also the de facto HEIC test
+│   ├── storage.ts                        # Supabase Storage service-role client — signed QR upload URLs, best-effort delete
+│   └── storageUrl.ts                     # publicObjectUrl() — deterministic public Storage URL from an object path, no client/secret
 ├── components/
 │   └── ExpenseBreakdown.tsx              # collapsible per-person charge list, shared by the settle + view pages
 ├── schemas/
@@ -204,6 +208,9 @@ Route Handlers have no Express-style centralized error middleware. Each mutating
 | `GET /api/sessions/:sessionId` | ✅ | Returns the session with `participants` and `expenses` (with `payer` + `splits`) included |
 | `POST /api/sessions/:sessionId/participants` | ✅ | Adds one participant to an existing session; 404s if the session doesn't exist |
 | `PATCH /api/sessions/:sessionId/participants/:participantId` | ✅ | A participant sets their own `payment_method_type` + `payment_details` |
+| `POST /api/sessions/:sessionId/participants/:participantId/qr` | ✅ | Mints a signed Supabase Storage upload URL for a new QR image; takes no body — the upload pipeline (`lib/imageCompress.ts`) always outputs JPEG, so there's no client-supplied content-type to trust |
+| `PUT /api/sessions/:sessionId/participants/:participantId/qr` | ✅ | Persists the object path after the client's direct-to-Storage upload succeeds; 400s if the path isn't scoped to this session's folder; best-effort deletes the replaced object (never blocks or fails the response) |
+| `DELETE /api/sessions/:sessionId/participants/:participantId/qr` | ✅ | Clears `qr_object_path` and best-effort deletes the Storage object |
 | `POST /api/sessions/:sessionId/expenses` | ✅ | EVEN / CUSTOM / QUANTITY split; validated via `createExpenseSchema`. EVEN rounding: per-cent rounding is reconciled by pushing the ±1¢ remainder onto the first participant's share, same as QUANTITY — without this, 3-way splits of ₱100 produce ₱99.99 total and settlements never net to zero |
 | `PATCH /api/sessions/:sessionId/expenses/:expenseId` | ✅ | Edits an expense in place — same validation as `POST` via `createExpenseSchema` and the shared `buildExpenseSplits()` helper, then replaces the old `ExpenseSplit` rows transactionally (`deleteMany` + nested `create`, same shape the settlement "recalculate" flow already used). Replaces the old delete-and-recreate-to-fix-a-mistake workflow |
 | `PATCH /api/sessions/:sessionId/expenses` | ✅ | Bulk reorder: caller sends every expense id in this session in its new order; `sort_order` is reassigned to match. Rejects a partial, duplicate, or foreign-id list — the array must cover every expense in the session exactly once. Deliberately a collection-level route (not nested under `/:expenseId`) so its path can never collide with the edit route above. Returns `204` with no body |
@@ -318,11 +325,20 @@ sequenceDiagram
 - **No identity gating** — consistent with the rest of the app, anyone with the link can set anyone's payment method.
 - **Parsing lives in one place** — `lib/paymentDetails.ts` (`parseBankDetails` / `formatBankDetails`). It used to be hand-written with a magic `+3` (the separator's length) in three places independently — exactly the duplication where one drifting copy silently corrupts bank details.
 
+**QR code upload** — a fourth tab ("QR") in the same payment-method editor, alongside GCash/Maya/Bank Transfer. Tapping a participant's row to expand the form seeds `activeTab` from `payment_method_type`, falling back to `"QR"` when that's null but a QR is set — without the fallback, a QR-only participant's form silently opened on an empty GCash tab even though the collapsed row correctly showed "QR code ✓". Upload/replace/remove persist immediately — no Save button, since (unlike the other three tabs) there's nothing to stage.
+
+- **Compression before upload** — `lib/imageCompress.ts`, pure `<canvas>`, no dependency: draws the picked file to a canvas capped at 1600px on the longest edge, fills a white background first (a transparent QR would otherwise composite onto a browser-determined backdrop, commonly black, and become unscannable), re-exports as JPEG at 0.85 quality. Also doubles as the HEIC test — most current iOS Safari versions decode HEIC directly via `<img>`, so it just works with zero extra code; a browser that can't surfaces a clear error (via the existing `paymentMethodError` banner) instead of a silently broken upload.
+- **Upload flow** — `POST .../participants/:participantId/qr` mints a signed Supabase Storage upload URL (`lib/storage.ts`, service-role key, `persistSession: false` since it never manages a user session); the browser `PUT`s the compressed blob straight to Storage — never through a Route Handler, per the 4.5 MB body-size constraint in CLAUDE.md; then `PUT .../participants/:participantId/qr` persists the returned object path on the participant row and best-effort deletes the replaced object, if any (skipped when the path is unchanged, so a retried `PUT` can't delete the object the row now references).
+- **Path-ownership check** — the `PUT` route 400s if the client-supplied path doesn't start with `qrObjectPrefix(sessionId)`, the one place that prefix string is built, so a caller can't mint a signed URL in their own session and point another session's participant at it.
+- **One shared slot** (`Participant.qr_object_path`), not one per payment method — a GCash-generated QR scans fine in a bank app (QR Ph interoperability), and supplements `payment_method_type`/`payment_details`, never replaces them.
+- **Public URL derived at read time** — `lib/storageUrl.ts`'s `publicObjectUrl()` builds the public Storage URL from the stored path with no Supabase client and no secret key, kept separate from `lib/storage.ts` so `serialize.ts` doesn't pull the service-role client into its import graph.
+- Known open hardening tickets (a `capture="environment"` mobile-gallery-picker bug, a couple of security-hardening items) live under `.scratch/v2-qr-ph-upload/issues/` — current status in [CHANGELOG.md](CHANGELOG.md).
+
 **Payment display** — the settle screen reads each row's creditor payment method via a second `useSWR` call to `GET /api/sessions/:sessionId` (shares the SWR cache, so usually instant).
 
-- All three methods follow one pattern: a label, the copyable detail, and a "Copy" button (Clipboard API) — `components/PaymentAction.tsx`, shared by the settle screen and the read-only view.
+- All three copy-to-clipboard methods follow one pattern: a label, the copyable detail, and a "Copy" button (Clipboard API) — `components/PaymentAction.tsx`, shared by the settle screen and the read-only view.
 - **No GCash/Maya deep links** — neither app exposes a public URL that pre-fills a peer transfer, so a "Pay via GCash" button would be misleading.
-- **V2 plan** — QR Ph codes, which GCash, Maya, and most banks support natively. See CLAUDE.md's "Out of Scope for V1".
+- **QR code display (shipped)** — the same `PaymentAction.tsx` renders a creditor's uploaded QR as a tap-to-enlarge image (full-screen, `role="dialog"`, closes on Escape/backdrop/✕) alongside the copy-to-clipboard block when both are set, or alone when only a QR is set — see "QR code upload" above.
 
 **Per-person charge breakdown** — every settlement row on the settle screen and the read-only view expands (`components/ExpenseBreakdown.tsx`) to show which expenses the **debtor** is being charged for, so a participant can verify their own line items without scrolling the whole expense list.
 
