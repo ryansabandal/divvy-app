@@ -88,7 +88,17 @@ model ExpenseSplit {
   // Units this participant consumed in a QUANTITY split; null for EVEN/CUSTOM
   units          Int?
   expense        Expense     @relation(fields: [expense_id], references: [id], onDelete: Cascade)
-  participant    Participant @relation(fields: [participant_id], references: [id])
+  // Cascades on Participant delete too, unlike Settlement.debtor/creditor below. Without this the
+  // pg_cron retention job could not delete a single session that had expenses: ExpenseSplit is two
+  // hops from Session (reachable only via Expense), so Postgres runs the Participant cascade's
+  // referential check before the Expense -> ExpenseSplit cascade has cleared these rows, and
+  // `DELETE FROM "Session"` fails with 23503. Settlement escapes that only because it hangs
+  // directly off Session — one hop — which is why the gap wasn't visible by reading the schema.
+  //
+  // The "loud FK error" reasoning that keeps the Settlement FKs restrictive is weakest here: a
+  // split has no life independent of its expense (it already cascades from one), so it is not a
+  // record anyone would want preserved after its participant is gone.
+  participant    Participant @relation(fields: [participant_id], references: [id], onDelete: Cascade)
 
   // Covers the expense -> splits and participant -> splits FKs
   @@index([expense_id])
@@ -105,9 +115,11 @@ model Settlement {
   amount     Float
   // Whether this payment has actually been made; toggled from the settle screen
   paid       Boolean     @default(false)
-  // Cascades on Session delete, same as Participant.session/Expense.session above — together these
-  // three make `DELETE FROM "Session"` a single-statement, fully cascading delete, which the
-  // pg_cron monthly cleanup job (see CLAUDE.md) relies on.
+  // Cascades on Session delete, same as Participant.session/Expense.session above. Those three
+  // plus ExpenseSplit.participant (see above) are what make `DELETE FROM "Session"` a
+  // single-statement, fully cascading delete, which the pg_cron monthly cleanup job (see
+  // CLAUDE.md) relies on. The three alone were NOT enough — that was ticket 26: the claim was
+  // reasoned about but never executed, and the job could not delete any session with expenses.
   // debtor/creditor deliberately don't cascade: no route deletes a Participant on its own today,
   // and if one ever does, a loud FK error beats silently vanishing one side of a payment plan.
   session    Session     @relation(fields: [session_id], references: [id], onDelete: Cascade)
