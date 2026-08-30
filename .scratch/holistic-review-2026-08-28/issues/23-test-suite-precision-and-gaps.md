@@ -21,3 +21,13 @@ The suite is generally strong (session-scoped isolation, exact key-set shape loc
 Fix each item alongside the corresponding code fix (01, 03, 04, 05, 07, 08) rather than as a separate pass, except items 5 and 6 which stand alone.
 
 Found by: correctness-reviewer + best-practice-reviewer, holistic review (2026-08-28).
+
+## Comments
+
+**2026-08-30 — item 1 done**, alongside ticket 07's fix. `tests/sessions.integration.test.ts:504-507` and `:788-791` are now exact `toBe(100)` / `toBe(33.34)` / `toBe(33.33)`. The EVEN block's comment claiming the exact distribution was "an implementation detail" is gone — it is pinned now, which is the point of the item.
+
+Caveat worth carrying to any future precision assertion: `distributeCents()` guarantees the sum is exact **in centavos**, but these tests sum **pesos**. `33.34 + 33.33 + 33.33` happens to be exactly `100` in IEEE754, which is why `toBe` is safe here; the 18-way ₱1.00 split sums to `1.0000000000000004`. Check the specific addition before pinning a total exactly, or round first.
+
+**Remaining items, sorted by whether they are doable today:**
+- **Items 4, 5, 6 — doable now.** Item 4's pairings (tickets 01, 03, 04, 05) are all resolved, so those negative/boundary cases are writable; the exception is the reorder-route-at-cap case, which pairs with still-open ticket 36. Items 5 and 6 always stood alone. Item 5 is the one with real consequences — a failing assertion above the trailing QR `DELETE` leaves an object in the production-adjacent Storage bucket permanently, and ticket 24 says nothing reclaims it.
+- **Items 2 and 3 — blocked on ticket 08.** Item 3 says so outright ("fix ticket 08 first and this becomes moot"), and item 2's `frozen` round-trip contradiction lives in the same route. Both ride with the 08 + 09 settlements slice, which is still waiting on the `orderBy` decision — the `Settlement` model has no `created_at` or `sort_order`, so it is either `orderBy: { id: "asc" }` (arbitrary, and POST must sort identically) or a migration adding a column.

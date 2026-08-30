@@ -35,23 +35,26 @@ to a follow-up that was never filed. File that or explicitly drop it in the same
 
 ## A · Money precision and rounding
 
-**[h07](holistic-review-2026-08-28/issues/07-remainder-push-negative-share.md)** · Low · negative `amount_owed` from the remainder push
+**~~h07~~** · ✅ **resolved 2026-08-30** · negative `amount_owed` from the remainder push
 **[h17](holistic-review-2026-08-28/issues/17-money-util-epsilon-sprawl.md)** · Low · epsilon and rounding sprawl
-**[v1-05](v1-hardening-audit/issues/05-money-rounding-util.md)** · Medium · no money util
+**[v1-05](v1-hardening-audit/issues/05-money-rounding-util.md)** · Medium · no money util — **part (a) done**
 
-Same two blocks: `lib/expenseSplits.ts:36-44` (EVEN) and `:95-103` (QUANTITY). v1-05's fix sketch —
-"factor remainder-distribution into one function" — *is* h07's edit, and h17 is the up-to-date
-superset of v1-05 (v1-05's own comment section says so).
+h07 shipped `lib/money.ts` `distributeCents()`, called by both the EVEN and QUANTITY branches of
+`buildExpenseSplits()`. That closes v1-05's "factor remainder-distribution into one function" and
+h17's part (a), and removes every `Math.round(x * 100) / 100` from `lib/expenseSplits.ts`. h23
+item 1 (exact `toBe` on the remainder assertions) went with it, as planned.
 
-**h17 is ~60% already done.** Tickets 01 and 06 closed three of its five instance bullets. What
-remains: `components/ExpenseBreakdown.tsx:8`'s re-declared `CENT_EPSILON`,
-`lib/expenseBreakdown.ts:41`'s misnamed `toCents()` (returns pesos, not centavos), and the util.
+**What is left in this cluster is one pure-refactor commit.** `roundToCents()` was deliberately
+*not* shipped with h07 — that fix removes its last call site in `expenseSplits.ts`, so it would
+have landed as an unused export (the exact smell ticket 30 was filed for). Add it next to
+`distributeCents()` in the same commit as its real call sites: rename `lib/expenseBreakdown.ts:41`'s
+misnamed `toCents()` (returns pesos, not centavos), drop `components/ExpenseBreakdown.tsx:8`'s
+re-declared `CENT_EPSILON` for an import of `RECONCILED_EPSILON`, and replace the bare `0.01`
+literals in `lib/settlementHelpers.ts` and `app/[sessionId]/page.tsx`.
 
-**Two slices, not one commit.** Land h07's integer-cent distribution helper in a new `lib/money.ts`
-from the start rather than inline — same effort, satisfies v1-05's "one function" ask for free, and
-avoids editing those two blocks twice. Then pin the exact test values (h23 item 1). The rest of h17
-is a pure refactor; mixing it into a correctness fix that also re-pins expected values makes a diff
-nobody can review.
+**Carry forward:** `distributeCents()` guarantees an exact sum *in centavos*. Peso sums are still
+floats — the 18-way ₱1.00 split adds up to `1.0000000000000004` — so check the specific addition
+before pinning any total with an exact assertion.
 
 ## B · Settlements route: queries and ordering
 
@@ -85,6 +88,14 @@ changes what h13 is optimizing. Decide h36's direction before touching h13's tra
 Both `needs-triage`-grade decisions. h36 reverses ticket 28's deliberate choice against locking.
 
 ## D · Route hardening — small, independent, shippable now
+
+**[h38](holistic-review-2026-08-28/issues/38-unbounded-amount-overflows-settlement-plan.md)** ·
+**High** · unbounded `amount` overflows to `Infinity` — **do this one first**.
+A single expense blanks every amount in the settlement plan (`Infinity` serialises to JSON `null`);
+50 of them hang `computeSettlements` in a non-terminating loop and brick the session. Pre-existing,
+not introduced by h07. Fix is one `.max()` on the shared `amount` field in `schemas/sessions.ts`
+plus an iteration bound on the `while` loop in `lib/settle.ts`. Filed 2026-08-30.
+
 
 **[h10](holistic-review-2026-08-28/issues/10-loadsessionparticipants-overfetch.md)** · Low · narrow the `include` to `select: { id: true }`
 **[h37](holistic-review-2026-08-28/issues/37-participant-qr-routes-unguarded-p2025.md)** · Low · apply `isMissingRowError()` to 3 more routes
@@ -144,10 +155,15 @@ qr-03 is `needs-info` — it needs a real device check, and the user asked to co
 **[qr-06](v2-qr-ph-upload/issues/06-storage-configured-test-gate-wrong-process-env.md)** · Low · `STORAGE_CONFIGURED` reads the wrong process's env
 
 **h23 is deliberately split across other clusters** — its own instruction is to fix each item
-alongside the corresponding code fix. Item 1 → cluster A. Items 2 and 3 → cluster B. Item 4's
-negative cases → wherever the matching route work lands. **Only items 5 and 6 stand alone**: QR
-Storage cleanup is not exception-safe (a failing assertion leaks a real object into a
-production-adjacent bucket, permanently), and a helper is `describe`-scoped for no reason.
+alongside the corresponding code fix.
+
+- **Item 1 → done 2026-08-30** with h07 (cluster A).
+- **Items 4, 5, 6 → doable now.** Item 4's pairings (tickets 01, 03, 04, 05) are all resolved, so
+  those negative cases are writable today; the exception is the reorder-at-cap case, which pairs
+  with still-open h36. Items 5 and 6 always stood alone. Item 5 is the one that matters — a failing
+  assertion above the trailing QR `DELETE` leaks a real object into a production-adjacent bucket,
+  permanently, and h24 says nothing reclaims it.
+- **Items 2 and 3 → blocked on h08** (cluster B). Item 3 says so outright.
 
 qr-06 is independent test-infra work.
 
@@ -194,12 +210,12 @@ encodes the `/` separators and breaks every valid path. Remediation follows the 
 
 ## Suggested order
 
-1. **A** — h07 with its helper in `lib/money.ts`, plus h23 item 1.
-2. **A** — the h17 remainder, as its own refactor commit.
+1. ~~**A** — h07 with its helper in `lib/money.ts`, plus h23 item 1.~~ ✅ done 2026-08-30.
+2. **A** — the h17 remainder, as its own refactor commit. ← **next**
 3. **B** — h08 + h09 + h23 items 2/3, once the `orderBy` decision is made.
 4. **D** — h10, h37, h21. Plus **F** (h16, v1-07, h19), which is independent.
 5. **J** — papercuts.
 6. Decisions: **C** (h36 direction), **G** (h11 wire contract), then **E** with a plan.
 7. **K** last.
 
-**H**, **I** item 5/6, and **qr-06** slot in anywhere. **L** is the user's, not an agent's.
+**H**, **I** items 4/5/6, and **qr-06** slot in anywhere. **L** is the user's, not an agent's.

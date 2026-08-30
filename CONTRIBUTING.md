@@ -75,7 +75,7 @@ pooled string is the only one the running app should ever use.
 | Regenerate the Prisma Client after schema changes (also runs automatically via `postinstall`) | `npm run prisma:generate` |
 | Inspect the DB in a browser GUI | `npx prisma studio` (http://localhost:5555) |
 | Inspect the DB via raw SQL | `podman exec -it divvy-app_db_1 psql -U divvy` |
-| Run unit tests once (`lib/settle.test.ts`) | `npm test` |
+| Run unit tests once (every `lib/*.test.ts`) | `npm test` |
 | Run the unit suite in watch mode | `npm run test:watch` |
 | Run the HTTP integration suite (needs `npm run dev` running) | `npm run test:integration` |
 | Stop Postgres (keeps data) | `podman-compose down` (add `-v` to wipe the volume) |

@@ -41,6 +41,8 @@ divvy-app/
 │   ├── expenseBreakdown.ts                   # buildParticipantBreakdown() — what one person is charged for; pure, no React
 │   ├── expenseSession.ts                     # loadSessionParticipants()/validatePayer() — shared session-fetch + payer-membership check for expense routes
 │   ├── expenseSplits.ts                      # split-building logic for EVEN/CUSTOM/QUANTITY
+│   ├── money.ts                              # distributeCents() — apportions a centavo total across weighted shares
+│   ├── money.test.ts                         # Vitest unit tests for the apportionment, incl. a no-negative/exact-sum sweep
 │   ├── requestBody.ts                        # parseBody()/parseJsonBody() — shared parse-then-validate-then-400 pipeline for every mutating route
 │   ├── serialize.ts                          # DB row → API response shaping
 │   ├── settlementHelpers.ts                  # shared settlement-plan helpers

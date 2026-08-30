@@ -34,8 +34,8 @@ describe("computeSettlements", () => {
   });
 
   it("reconciles an uneven 3-way split with no residual", () => {
-    // A paid 100, shared 33.34/33.33/33.33 — sessions.ts's remainder-push already makes
-    // these sum to exactly zero before computeSettlements ever sees them
+    // A paid 100, shared 33.34/33.33/33.33 — the splits already sum to exactly zero
+    // before computeSettlements ever sees them
     const balances: ParticipantBalance[] = [
       { participantId: "A", balance: 66.66 },
       { participantId: "B", balance: -33.33 },

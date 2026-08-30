@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { RECONCILED_EPSILON } from "./settle";
+import { distributeCents } from "./money";
 import type { createExpenseSchema } from "../schemas/sessions";
 
 // Result of buildExpenseSplits: either the rows are ready to persist, or a DB-level validation
@@ -14,8 +15,9 @@ export type SplitBuildResult =
   | { ok: false; error: string };
 
 // Builds the ExpenseSplit rows (and, for QUANTITY, the Expense.quantity value) for one of the
-// three split types. Shared by POST (create) and PATCH (edit) so this logic — duplicate-id
-// guards, rounding, and remainder distribution — has exactly one home instead of two copies.
+// three split types. Shared by POST (create) and PATCH (edit) so the duplicate-id and
+// sum guards have exactly one home instead of two copies; the centavo apportionment
+// behind EVEN and QUANTITY lives in lib/money.ts.
 export function buildExpenseSplits(
   body: z.infer<typeof createExpenseSchema>,
   participantIdsInSession: Set<string>,
@@ -32,17 +34,13 @@ export function buildExpenseSplits(
       return { ok: false, error: "participant_ids must not contain duplicates" };
     }
 
-    // Even share, rounded to the cent — matches how the group already splits bills by hand
-    const share = Math.round((amount / participant_ids.length) * 100) / 100;
-    const splitRows = participant_ids.map((id) => ({ participant_id: id, amount_owed: share }));
-
-    // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
-    const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
-    const remainder = Math.round((amount - allocated) * 100) / 100;
-    const first = splitRows[0];
-    if (remainder !== 0 && first) {
-      first.amount_owed = Math.round((first.amount_owed + remainder) * 100) / 100;
-    }
+    // Equal weights, so everyone owes the same whole centavo except the few who absorb the
+    // leftover — matches how the group already splits bills by hand
+    const cents = distributeCents(Math.round(amount * 100), participant_ids.map(() => 1));
+    const splitRows = participant_ids.map((id, i) => ({
+      participant_id: id,
+      amount_owed: (cents[i] ?? 0) / 100,
+    }));
 
     return { ok: true, splitRows, expenseQuantity: null };
   }
@@ -87,21 +85,14 @@ export function buildExpenseSplits(
     return { ok: false, error: `units add up to ${totalUnits}, but quantity is ${quantity}` };
   }
 
-  // Compute each person's share from the unit price, rounded to the cent
-  const unitPrice = amount / quantity;
-  const splitRows = splits.map((s) => ({
+  // Each person's share weighted by the units they consumed, so the leftover centavos land on
+  // the shares that lost the most to rounding rather than all on one person
+  const cents = distributeCents(Math.round(amount * 100), splits.map((s) => s.units));
+  const splitRows = splits.map((s, i) => ({
     participant_id: s.participant_id,
     units: s.units,
-    amount_owed: Math.round(s.units * unitPrice * 100) / 100,
+    amount_owed: (cents[i] ?? 0) / 100,
   }));
-
-  // Per-cent rounding can leave the splits a few centavos off the total — push the remainder onto the first person
-  const allocated = splitRows.reduce((sum, r) => sum + r.amount_owed, 0);
-  const remainder = Math.round((amount - allocated) * 100) / 100;
-  const first = splitRows[0];
-  if (remainder !== 0 && first) {
-    first.amount_owed = Math.round((first.amount_owed + remainder) * 100) / 100;
-  }
 
   return { ok: true, splitRows, expenseQuantity: quantity };
 }

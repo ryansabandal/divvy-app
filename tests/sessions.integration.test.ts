@@ -421,7 +421,7 @@ describe("POST /api/sessions/:sessionId/expenses — EVEN split", () => {
     expect(body.split_type).toBe("EVEN");
     // serializeExpense only fills in quantity for QUANTITY splits — EVEN/CUSTOM should be null
     expect(body.quantity).toBeNull();
-    // 300 / 3 participants — divides evenly, so no remainder-pushing kicks in here
+    // 300 / 3 participants — divides evenly, so there is no leftover centavo to hand out
     const amounts = body.splits.map((s: any) => s.amount_owed).sort((x: number, y: number) => x - y);
     expect(amounts).toEqual([100, 100, 100]);
   });
@@ -480,9 +480,9 @@ describe("POST /api/sessions/:sessionId/expenses — EVEN split", () => {
     ]);
   });
 
-  it("pushes the rounding remainder onto the first participant so the split sums exactly", async () => {
-    // 100 / 3 = 33.333... — per-cent rounding alone would total 99.99, not 100.
-    // buildExpenseSplits() detects that 1-centavo gap and adds it to the first person's share.
+  it("hands the leftover centavo to the first participant so the split sums exactly", async () => {
+    // 100 / 3 = 33.333... — three whole-centavo shares total 99.99, leaving one centavo,
+    // which goes to the participant whose share lost the most to rounding.
     const session = await createSessionWithParticipants(3);
     const [a, b, c] = session.participants;
 
@@ -499,12 +499,11 @@ describe("POST /api/sessions/:sessionId/expenses — EVEN split", () => {
 
     const byParticipant = new Map(body.splits.map((s: any) => [s.participant_id, s.amount_owed]));
     const total = body.splits.reduce((sum: number, s: any) => sum + s.amount_owed, 0);
-    // The exact distribution (33.34/33.33/33.33) is an implementation detail — what must hold
-    // is that the three shares add up to precisely 100, with no dropped or invented centavo
-    expect(total).toBeCloseTo(100, 2);
-    expect(byParticipant.get(a.id)).toBeCloseTo(33.34, 2);
-    expect(byParticipant.get(b.id)).toBeCloseTo(33.33, 2);
-    expect(byParticipant.get(c.id)).toBeCloseTo(33.33, 2);
+    // Exact, not approximate — a half-centavo tolerance would accept a dropped or invented centavo
+    expect(total).toBe(100);
+    expect(byParticipant.get(a.id)).toBe(33.34);
+    expect(byParticipant.get(b.id)).toBe(33.33);
+    expect(byParticipant.get(c.id)).toBe(33.33);
   });
 
   it("rejects a participant_ids entry not in this session", async () => {
@@ -756,14 +755,14 @@ describe("POST /api/sessions/:sessionId/expenses — QUANTITY split", () => {
     expect(status).toBe(201);
     expect(body.quantity).toBe(6);
     const byParticipant = new Map(body.splits.map((s: any) => [s.participant_id, s.amount_owed]));
-    // Unit price is 60/6 = 10 — a clean division, no remainder-push needed for this assertion
+    // Unit price is 60/6 = 10 — a clean division, so there is no leftover centavo here
     expect(byParticipant.get(a.id)).toBe(20);
     expect(byParticipant.get(b.id)).toBe(40);
   });
 
-  it("pushes the rounding remainder onto the first participant, same as EVEN", async () => {
-    // 100 / 3 units = 33.333... per unit — three 1-unit shares round to 33.33 each (99.99 total),
-    // same remainder-push code path as EVEN's 100/3 test, but exercised through the QUANTITY branch
+  it("hands the leftover centavo out the same way as EVEN", async () => {
+    // 100 / 3 units = 33.333... per unit — three 1-unit shares come to 33.33 each (99.99 total),
+    // leaving one centavo, exercised here through the QUANTITY branch
     const session = await createSessionWithParticipants(3);
     const [a, b, c] = session.participants;
 
@@ -785,10 +784,11 @@ describe("POST /api/sessions/:sessionId/expenses — QUANTITY split", () => {
 
     const byParticipant = new Map(body.splits.map((s: any) => [s.participant_id, s.amount_owed]));
     const total = body.splits.reduce((sum: number, s: any) => sum + s.amount_owed, 0);
-    expect(total).toBeCloseTo(100, 2);
-    expect(byParticipant.get(a.id)).toBeCloseTo(33.34, 2);
-    expect(byParticipant.get(b.id)).toBeCloseTo(33.33, 2);
-    expect(byParticipant.get(c.id)).toBeCloseTo(33.33, 2);
+    // Exact, as in the EVEN leftover-centavo test above
+    expect(total).toBe(100);
+    expect(byParticipant.get(a.id)).toBe(33.34);
+    expect(byParticipant.get(b.id)).toBe(33.33);
+    expect(byParticipant.get(c.id)).toBe(33.33);
   });
 
   it("rejects units that don't add up to the declared quantity", async () => {
