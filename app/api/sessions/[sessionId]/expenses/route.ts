@@ -3,9 +3,14 @@ import { prisma } from "@/lib/db";
 import { requireValidSessionId } from "@/lib/validation";
 import { serializeExpense } from "@/lib/serialize";
 import { buildExpenseSplits } from "@/lib/expenseSplits";
-import { loadSessionParticipants, validatePayer } from "@/lib/expenseSession";
+import { loadExpenseSessionContext, validatePayer, MAX_EXPENSES_PER_SESSION } from "@/lib/expenseSession";
 import { createExpenseSchema, reorderExpensesSchema } from "@/schemas/sessions";
 import { parseBody } from "@/lib/requestBody";
+import { isMissingRowError } from "@/lib/prismaErrors";
+
+// Both the up-front completeness check and the lost-row catch below answer with this, so the
+// client gets one message for one condition
+const INCOMPLETE_REORDER_MESSAGE = "expense_ids must include every expense in this session exactly once";
 
 // POST /api/sessions/:sessionId/expenses — add an expense, split EVEN across chosen
 // participants, CUSTOM with manual per-participant amounts, or QUANTITY by units consumed
@@ -23,9 +28,19 @@ export async function POST(
   const body = parseResult.data;
   const { description, amount, paid_by } = body;
 
-  const loadResult = await loadSessionParticipants(sessionId);
+  const loadResult = await loadExpenseSessionContext(sessionId);
   if (!loadResult.ok) return loadResult.response;
-  const { participantIdsInSession } = loadResult;
+  const { participantIdsInSession, expenseCount } = loadResult;
+
+  // Rejects a create once the session is at the cap. Concurrent creates each read the same
+  // pre-write count, so a burst can still land a session past it — nothing in the DB enforces this.
+  if (expenseCount >= MAX_EXPENSES_PER_SESSION) {
+    return NextResponse.json(
+      { error: `this session already has the maximum of ${MAX_EXPENSES_PER_SESSION} expenses` },
+      { status: 400 },
+    );
+  }
+
   const payerError = validatePayer(participantIdsInSession, paid_by);
   if (payerError) return payerError;
 
@@ -87,16 +102,29 @@ export async function PATCH(
     expense_ids.every((id: string) => currentIds.has(id));
   if (!isCompleteReorder) {
     return NextResponse.json(
-      { error: "expense_ids must include every expense in this session exactly once" },
+      { error: INCOMPLETE_REORDER_MESSAGE },
       { status: 400 },
     );
   }
 
-  await prisma.$transaction(
-    expense_ids.map((id, index) =>
-      prisma.expense.update({ where: { id }, data: { sort_order: index } }),
-    ),
-  );
+  try {
+    await prisma.$transaction(
+      expense_ids.map((id, index) =>
+        prisma.expense.update({ where: { id }, data: { sort_order: index } }),
+      ),
+    );
+  } catch (err) {
+    // An id vanished between the check above and this transaction — someone deleted an expense
+    // mid-drag. The transaction rolls back, so nothing is half-reordered. 400 rather than 404:
+    // the caller's list no longer describes this session, which is what the message already says.
+    if (isMissingRowError(err)) {
+      return NextResponse.json(
+        { error: INCOMPLETE_REORDER_MESSAGE },
+        { status: 400 },
+      );
+    }
+    throw err;
+  }
 
   // The caller already has the new order (it sent it) — no need to re-fetch and re-serialize
   // the whole list, same pattern as DELETE .../expenses/:expenseId

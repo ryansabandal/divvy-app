@@ -13,3 +13,14 @@ Fix: narrow to `select: { participants: { select: { id: true } } }`. Drop-in cha
 **Collision note:** ticket 03 (expense-reorder-cap-asymmetry) needs this same `findUnique` to also fetch `_count: { select: { expenses: true } }` for its cap check. Whichever of these two tickets is implemented second must not drop what the other added — the final query needs both the participant id `select` and the expense `_count`.
 
 Found by: best-practice-reviewer, holistic review (2026-08-28).
+
+**Update (2026-08-30, ticket 32):** the helper is now `loadExpenseSessionContext` and its result type
+`LoadExpenseSessionResult`, both in `lib/expenseSession.ts` — the old "participants" name is gone, so
+this ticket's title and the `select` above refer to a symbol that no longer exists. Re-read the file
+before working it.
+
+The collision note above is now load-bearing rather than advisory: ticket 03's cap is what tickets 28
+and 34 built on, so a narrowing that drops `_count: { select: { expenses: true } }` re-opens the
+expense-cap dead end. It would be caught by `tsc` (the return statement destructures
+`session._count.expenses`), not silently — but the fix is to keep `_count`, never to delete the
+destructure to make the compiler quiet.

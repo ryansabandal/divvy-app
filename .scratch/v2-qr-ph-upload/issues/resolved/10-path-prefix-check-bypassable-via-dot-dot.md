@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Low
 Category: Security
 
@@ -17,3 +17,11 @@ Found by: security-reviewer, Phase G.2 review (2026-08-16).
 ## Comments
 
 **2026-08-28, holistic review:** confirmed reachable as filed. `.scratch/holistic-review-2026-08-28/issues/02-qr-path-unbounded-length.md` applies the exact fix sketch above (regex against the minted shape) as the fix for an unbounded-length finding on the same field — implementing that ticket closes this one too, as a side effect, in the same edit. Not marking this resolved yet; leaving that for whoever implements the fix to confirm and flip.
+
+**2026-08-29 — resolved, as a side effect of `holistic-review-2026-08-28/02` exactly as predicted above.** The `startsWith` prefix check is gone; the route now calls `isMintedQrPath(sessionId, path)`, an anchored full-string match against the minted shape, which lives in `lib/storage.ts` beside the mint itself so producer and validator cannot drift apart.
+
+`..` cannot survive that anchor: the only characters permitted between the escaped prefix and the literal `.jpg` are those of a v4 UUID, and `.` is not among them.
+
+Confirmed against the running route rather than by reading the regex — `dev/qr/<sid>/../../qr/<victim>/<uuid>.jpg` and `dev/qr/<sid>/../<uuid>.jpg` both return 400, while a well-formed `dev/qr/<sid>/<uuid>.jpg` still returns 200. That last row matters as much as the rejections: an over-tight anchor that also rejected legitimate paths would have broken QR upload entirely, and an early run of this probe did report a false rejection — caused by my probe omitting the `SUPABASE_STORAGE_PREFIX` value, not by the code.
+
+Two refinements on this ticket's own fix sketch, worth recording because the sketch was reused verbatim in the newer ticket: `[0-9a-f-]{36}` also matches 36 hyphens, so a real v4 pattern replaced it; and the interpolated env prefix is now regex-escaped, since a metacharacter in `SUPABASE_STORAGE_PREFIX` would otherwise silently change what the anchor matches.

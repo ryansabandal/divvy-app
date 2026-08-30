@@ -69,11 +69,11 @@ divvy-app/
 │   ├── db.ts                             # shared Prisma client — globalThis singleton guard for dev HMR, max:1 pool behind Supabase's Supavisor pooler
 │   ├── settle.ts, settle.test.ts         # debt simplification — pure function, no Prisma/DB calls
 │   ├── validation.ts                     # requireValidSessionId() and friends
-│   ├── requestBody.ts                    # parseBody()/parseJsonBody() — shared parse-then-validate-then-400 pipeline for every mutating route
+│   ├── requestBody.ts                    # parseBody() — shared parse-then-validate-then-400 pipeline for every mutating route
 │   ├── serialize.ts                      # DB row → API response shaping
 │   ├── settlementHelpers.ts              # shared settlement-plan helpers
 │   ├── expenseSplits.ts                  # split-building logic for EVEN/CUSTOM/QUANTITY
-│   ├── expenseSession.ts                 # loadSessionParticipants()/validatePayer() — shared session-fetch + payer-membership check for expense routes
+│   ├── expenseSession.ts                 # loadExpenseSessionContext()/validatePayer() + MAX_EXPENSES_PER_SESSION — shared session-fetch, payer-membership check, and expense cap for expense routes
 │   ├── recentSessions.ts                 # localStorage helper — remembers visited sessions on this device
 │   ├── paymentDetails.ts                 # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
 │   ├── fetcher.ts                        # shared SWR fetcher (generic error message parameterized per page)
@@ -329,7 +329,7 @@ sequenceDiagram
 
 - **Compression before upload** — `lib/imageCompress.ts`, pure `<canvas>`, no dependency: draws the picked file to a canvas capped at 1600px on the longest edge, fills a white background first (a transparent QR would otherwise composite onto a browser-determined backdrop, commonly black, and become unscannable), re-exports as JPEG at 0.85 quality. Also doubles as the HEIC test — most current iOS Safari versions decode HEIC directly via `<img>`, so it just works with zero extra code; a browser that can't surfaces a clear error (via the existing `paymentMethodError` banner) instead of a silently broken upload.
 - **Upload flow** — `POST .../participants/:participantId/qr` mints a signed Supabase Storage upload URL (`lib/storage.ts`, service-role key, `persistSession: false` since it never manages a user session); the browser `PUT`s the compressed blob straight to Storage — never through a Route Handler, per the 4.5 MB body-size constraint in CLAUDE.md; then `PUT .../participants/:participantId/qr` persists the returned object path on the participant row and best-effort deletes the replaced object, if any (skipped when the path is unchanged, so a retried `PUT` can't delete the object the row now references).
-- **Path-ownership check** — the `PUT` route 400s if the client-supplied path doesn't start with `qrObjectPrefix(sessionId)`, the one place that prefix string is built, so a caller can't mint a signed URL in their own session and point another session's participant at it.
+- **Path-ownership check** — the `PUT` route 400s unless the client-supplied path matches the exact shape `createQrUploadUrl` mints for this session (`isMintedQrPath()`: an anchored regex of the session's own prefix, then a v4 UUID, then `.jpg`), so a caller can't mint a signed URL in their own session and point another session's participant at it, nor smuggle a traversal segment past a prefix test. The path field is also capped at 200 characters.
 - **One shared slot** (`Participant.qr_object_path`), not one per payment method — a GCash-generated QR scans fine in a bank app (QR Ph interoperability), and supplements `payment_method_type`/`payment_details`, never replaces them.
 - **Public URL derived at read time** — `lib/storageUrl.ts`'s `publicObjectUrl()` builds the public Storage URL from the stored path with no Supabase client and no secret key, kept separate from `lib/storage.ts` so `serialize.ts` doesn't pull the service-role client into its import graph.
 - Known open hardening tickets (a `capture="environment"` mobile-gallery-picker bug, a couple of security-hardening items) live under `.scratch/v2-qr-ph-upload/issues/` — current status in [CHANGELOG.md](CHANGELOG.md).

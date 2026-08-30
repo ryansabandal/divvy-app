@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: High
 Category: Correctness
 
@@ -19,3 +19,11 @@ Fix: compare rounded cents instead of raw float subtraction — `Math.round(f.am
 Test gap: the only positive stale test (`tests/sessions.integration.test.ts:1383`) changes the plan by ₱10, nowhere near the boundary. The suite already knows the straddle-the-boundary technique (the CUSTOM-epsilon pair at lines 620/641 pins 0.0049 accepted / 0.0051 rejected) — it wasn't applied here. Add a case that changes a finalized plan by exactly one centavo and asserts `stale: true`.
 
 Found by: correctness-reviewer, holistic review (2026-08-28); confirmed independently by Claude via a 200,000-case script before filing.
+
+## Comments
+
+**2026-08-29 — fixed.** `lib/settlementHelpers.ts` now compares `Math.round(f.amount * 100) === Math.round(l.amount * 100)` instead of `Math.abs(f.amount - l.amount) < 0.01`. Reproduced the filed miss rate first (177,455 / 200,000 = 88.7%) and re-ran the same 200,000 cases against the fix: 0 misses.
+
+Took the rounded-cent route rather than swapping in `RECONCILED_EPSILON`, and wrote the reason into the code so it isn't "corrected" later: that constant exists to absorb float noise accumulated while *summing* balances, whereas this comparison has no noise to absorb and must catch the smallest real change. A tolerance can't work here at any value — one centavo is simultaneously the noise floor and the signal.
+
+Regression test still outstanding (step 9 of the slice plan): a finalized plan changed by exactly one centavo must report `stale: true`.

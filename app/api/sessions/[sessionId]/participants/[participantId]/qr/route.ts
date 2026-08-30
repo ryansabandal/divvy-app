@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireValidSessionId } from "@/lib/validation";
-import { createQrUploadUrl, deleteStorageObjectBestEffort, qrObjectPrefix } from "@/lib/storage";
+import { createQrUploadUrl, deleteStorageObjectBestEffort, isMintedQrPath } from "@/lib/storage";
 import { publicObjectUrl } from "@/lib/storageUrl";
 import { setQrObjectPathSchema } from "@/schemas/sessions";
 import { parseBody } from "@/lib/requestBody";
@@ -47,11 +47,9 @@ export async function PUT(
   if (!parseResult.ok) return parseResult.response;
   const { path } = parseResult.data;
 
-  // The one genuinely new attack surface in this feature: without this check, a caller could mint
-  // a signed URL for their own session and then point another participant's row — in any session —
-  // at an arbitrary object path. qrObjectPrefix() is the single source of truth for this session's
-  // folder, shared with the mint above, so the two can never drift apart.
-  if (!path.startsWith(qrObjectPrefix(sessionId))) {
+  // Without this check, a caller could mint a signed URL for their own session and then point
+  // another participant's row — in any session — at an arbitrary object path
+  if (!isMintedQrPath(sessionId, path)) {
     return NextResponse.json({ error: "path is not scoped to this session" }, { status: 400 });
   }
 

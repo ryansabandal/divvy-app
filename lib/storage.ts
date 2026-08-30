@@ -24,7 +24,7 @@ const bucket = client.storage.from(process.env.SUPABASE_STORAGE_BUCKET!);
 // Defaults to "" when SUPABASE_STORAGE_PREFIX is absent or blank — Vercel Production deliberately
 // has no value set for this var (rather than an explicit empty string, which its dashboard makes
 // awkward to configure), so "unset" must resolve the same way "" would.
-export function qrObjectPrefix(sessionId: string): string {
+function qrObjectPrefix(sessionId: string): string {
   const envPrefix = process.env.SUPABASE_STORAGE_PREFIX || "";
   return `${envPrefix}qr/${sessionId}/`;
 }
@@ -36,6 +36,21 @@ export async function createQrUploadUrl(sessionId: string): Promise<{ path: stri
   const { data, error } = await bucket.createSignedUploadUrl(path, { upsert: false });
   if (error) throw error;
   return { path: data.path, signedUrl: data.signedUrl };
+}
+
+// Escape a string so it embeds literally in a regex pattern — SUPABASE_STORAGE_PREFIX is an
+// env var and could otherwise contribute metacharacters
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// The shape createQrUploadUrl mints above: this session's folder, a v4 UUID, then ".jpg"
+const MINTED_UUID = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+
+// True only for a path this app could have minted for this session. Anchored end to end, so a
+// path of any other shape — including one carrying ".." segments — is rejected.
+export function isMintedQrPath(sessionId: string, path: string): boolean {
+  return new RegExp(`^${escapeRegExp(qrObjectPrefix(sessionId))}${MINTED_UUID}\\.jpg$`).test(path);
 }
 
 // Delete one object — used when a participant replaces or removes their QR code, so the old

@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Medium
 Category: Correctness
 
@@ -21,3 +21,15 @@ Also note: this ticket's fix touches the same `loadSessionParticipants` query as
 No test currently exercises the reorder route at or over the 50-id cap — add one.
 
 Found by: correctness-reviewer, holistic review (2026-08-28).
+
+## Comments
+
+**2026-08-29 — fixed.** `MAX_EXPENSES_PER_SESSION = 50` is now exported from `schemas/sessions.ts` and used by *both* the reorder schema's `.max()` and a new count check in `POST /expenses`, so the invariant the ticket asked to be written down (**reorder cap ≥ creation cap**) is enforced by the two sides sharing one constant rather than by a comment nobody re-reads. The comment explains why it must hold: if creation could outrun the reorder cap, every drag in that session would 400 forever with no user-reachable way out.
+
+`loadSessionParticipants` gained `expenseCount` via `_count: { select: { expenses: true } }` on its existing `findUnique` — no extra round trip.
+
+**The cap is enforced in `POST` only, deliberately never in the helper.** `loadSessionParticipants` is shared with the expense-edit `PATCH`; capping inside it would make an already-over-50 session uneditable — the exact trap this ticket describes, just moved one layer down.
+
+**Collision note for Tier 2 is now live code, not a warning:** ticket 09/10's narrowing of this same `findUnique` must not drop the `_count`. A comment at the query says so.
+
+Still outstanding from this ticket: the live production check for any existing session already over 50 expenses (the cap strands such a session permanently), and the at-cap reorder test in step 9.

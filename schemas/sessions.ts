@@ -37,14 +37,21 @@ export const updateSettlementSchema = z.object({
 
 // Schema for PUT /api/sessions/:sessionId/participants/:participantId/qr — persists the object
 // path after the client's direct-to-Storage upload succeeds. The route itself (not this schema)
-// checks the path is actually scoped to this session — see qrObjectPrefix().
+// checks the path is one this session could have minted — see isMintedQrPath(). A minted path
+// runs about 85 characters, so the cap rejects an oversized string before it is stored or logged.
 export const setQrObjectPathSchema = z.object({
-  path: z.string().min(1, "path is required"),
+  path: z.string().min(1, "path is required").max(200, "path is too long"),
 });
+
+// Payload bound only, sized well above the creation cap in lib/expenseSession.ts: a session that
+// overshoots that cap must still be reorderable, so this rejects absurd request bodies and nothing else.
+export const MAX_REORDER_IDS = 500;
 
 // Schema for PATCH /api/sessions/:sessionId/expenses (bulk reorder)
 export const reorderExpensesSchema = z.object({
-  expense_ids: z.array(z.string()).max(50, "expense_ids must be 50 or fewer"),
+  expense_ids: z
+    .array(z.string())
+    .max(MAX_REORDER_IDS, `expense_ids must be ${MAX_REORDER_IDS} or fewer`),
 });
 
 // Schema for POST /api/sessions/:sessionId/expenses: discriminated union so each split_type gets its own shape

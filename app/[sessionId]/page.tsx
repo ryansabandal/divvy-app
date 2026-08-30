@@ -26,6 +26,7 @@ import { deriveDefaultPayer, deriveSessionPayer } from "@/lib/sessionPayer";
 import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
 import { compressImage } from "@/lib/imageCompress";
 import { fetcher } from "@/lib/fetcher";
+import { RECONCILED_EPSILON } from "@/lib/settle";
 import { SessionSummary } from "@/components/SessionSummary";
 import { SessionPayerNote } from "@/components/SessionPayerNote";
 import type { Participant, Expense, Session } from "@/lib/types";
@@ -529,9 +530,10 @@ export default function SessionPage() {
         setFormError("Enter an amount for at least one person");
         return;
       }
-      // Mirror the backend's rule: the custom amounts must sum to the expense total
+      // Mirror the backend's rule: the custom amounts must sum to the expense total, using the
+      // server's own tolerance so the two can't drift
       const sum = splits.reduce((s, x) => s + x.amount_owed, 0);
-      if (Math.abs(sum - amountNum) > 0.01) {
+      if (Math.abs(sum - amountNum) > RECONCILED_EPSILON) {
         setFormError(`₱${(amountNum - sum).toFixed(2)} still needs to be split`);
         return;
       }
@@ -985,7 +987,8 @@ export default function SessionPage() {
                 ))}
                 <div className="mt-1 flex justify-between text-sm">
                   <span className="text-navy/50">Remaining to split</span>
-                  <span className={expenseAmount > 0 && Math.abs(remaining) < 0.01 ? "font-medium text-teal" : "text-navy/50"}>
+                  {/* Teal when the split is balanced — same threshold as the submit guard */}
+                  <span className={expenseAmount > 0 && Math.abs(remaining) <= RECONCILED_EPSILON ? "font-medium text-teal" : "text-navy/50"}>
                     ₱{remaining.toFixed(2)}
                   </span>
                 </div>

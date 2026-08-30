@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireValidSessionId } from "@/lib/validation";
 import { serializeExpense } from "@/lib/serialize";
 import { buildExpenseSplits } from "@/lib/expenseSplits";
-import { loadSessionParticipants, validatePayer } from "@/lib/expenseSession";
+import { loadExpenseSessionContext, validatePayer } from "@/lib/expenseSession";
 import { createExpenseSchema } from "@/schemas/sessions";
 import { parseBody } from "@/lib/requestBody";
+import { isMissingRowError } from "@/lib/prismaErrors";
+
+// Both lookup misses and both lost-row catches below answer with this
+const EXPENSE_NOT_FOUND_MESSAGE = "expense not found in this session";
 
 // PATCH /api/sessions/:sessionId/expenses/:expenseId — edit an expense in place (rebuilds its
 // splits from the new values), replacing the old delete-then-recreate-to-fix-a-mistake workflow
@@ -23,7 +26,7 @@ export async function PATCH(
   const body = parseResult.data;
   const { description, amount, paid_by } = body;
 
-  const loadResult = await loadSessionParticipants(sessionId);
+  const loadResult = await loadExpenseSessionContext(sessionId);
   if (!loadResult.ok) return loadResult.response;
   const { participantIdsInSession } = loadResult;
 
@@ -34,7 +37,7 @@ export async function PATCH(
   // and an invalid paid_by still gets the more specific "expense not found" 404.
   const existing = await prisma.expense.findFirst({ where: { id: expenseId, session_id: sessionId } });
   if (!existing) {
-    return NextResponse.json({ error: "expense not found in this session" }, { status: 404 });
+    return NextResponse.json({ error: EXPENSE_NOT_FOUND_MESSAGE }, { status: 404 });
   }
 
   const payerError = validatePayer(participantIdsInSession, paid_by);
@@ -66,11 +69,10 @@ export async function PATCH(
       }),
     ]);
   } catch (err) {
-    // The expense can vanish between the existence check above and this transaction (e.g.
-    // another participant deleting it concurrently) — Prisma throws P2025 for an update
-    // targeting a row that's gone; treat that the same as the "not found" case above
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
-      return NextResponse.json({ error: "expense not found in this session" }, { status: 404 });
+    // The expense can vanish between the check above and this transaction if another device
+    // deletes it — same answer as the not-found case above
+    if (isMissingRowError(err)) {
+      return NextResponse.json({ error: EXPENSE_NOT_FOUND_MESSAGE }, { status: 404 });
     }
     throw err;
   }
@@ -92,11 +94,20 @@ export async function DELETE(
     where: { id: expenseId, session_id: sessionId },
   });
   if (!expense) {
-    return NextResponse.json({ error: "expense not found in this session" }, { status: 404 });
+    return NextResponse.json({ error: EXPENSE_NOT_FOUND_MESSAGE }, { status: 404 });
   }
 
   // onDelete: Cascade on ExpenseSplit means its rows are removed in the same operation
-  await prisma.expense.delete({ where: { id: expenseId } });
+  try {
+    await prisma.expense.delete({ where: { id: expenseId } });
+  } catch (err) {
+    // Same race as the PATCH above: the row went away between the lookup and the delete, which
+    // the lookup's own miss already reports as a 404
+    if (isMissingRowError(err)) {
+      return NextResponse.json({ error: EXPENSE_NOT_FOUND_MESSAGE }, { status: 404 });
+    }
+    throw err;
+  }
 
   return new NextResponse(null, { status: 204 });
 }

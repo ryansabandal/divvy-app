@@ -1519,7 +1519,7 @@ describe.skipIf(!STORAGE_CONFIGURED)(
       );
 
       expect(status).toBe(200);
-      // The path always lives under this session's folder — see qrObjectPrefix()
+      // The path always lives under this session's folder
       expect(body.path).toContain(`qr/${session.id}/`);
       expect(body.signed_url).toMatch(/^https?:\/\//);
     });

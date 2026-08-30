@@ -16,3 +16,12 @@ Failure scenario: CLAUDE.md is the stated spec and the first document an agent o
 Fix: sync the inline schema block to match prisma/schema.prisma exactly (or consider replacing it with a pointer to the file, since a duplicated schema is the actual root cause of this class of drift), and add the four missing files to the Project Structure listing.
 
 Found by: best-practice-reviewer, holistic review (2026-08-28).
+
+**Scope widened 2026-08-30 (absorbed ticket 33).** Two more files and one more relation drifted out of CLAUDE.md before this ticket was worked, and the 2026-08-30 slice added a third round of churn. **Treat the enumerated list above as a starting point, not the spec — re-diff CLAUDE.md against current source when picking this up.**
+
+Known additions since this ticket was filed:
+- Project Structure omits `lib/prismaErrors.ts` (ticket 04) and `tests/retention.integration.test.ts` (ticket 26).
+- The Data Model block still shows `ExpenseSplit.participant` with no `onDelete: Cascade`, though commit `cabe488` added it and the prose "Data retention" section already describes it.
+- `lib/expenseSession.ts` now also exports `MAX_EXPENSES_PER_SESSION` (tickets 28/34), and its helper was renamed to `loadExpenseSessionContext` (ticket 32). CLAUDE.md's one-line description of that module names neither.
+
+The root cause named above still stands: a schema duplicated into prose drifts independently of the schema. Replacing the inline block with a pointer to `prisma/schema.prisma` would end this class of ticket rather than resetting its clock.

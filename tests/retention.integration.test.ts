@@ -1,13 +1,10 @@
 // Schema-level tests for the data-retention delete path.
 //
 // Deliberately NOT in sessions.integration.test.ts: that suite talks to a running server over
-// real HTTP and never imports app internals (see its header). This one asserts a property of the
-// database itself — that `DELETE FROM "Session"` cascades — which no HTTP route exercises, since
-// the app has no delete-session endpoint. The only caller is the pg_cron job in Supabase
-// (CLAUDE.md "Data retention"), so the statement it runs is what gets tested here.
-//
-// This file exists because ticket 26 shipped undetected: the cascade was reasoned about in schema
-// comments and reviewed, but no test ever deleted a Session, so nobody ran the statement.
+// real HTTP and never imports app internals. This one asserts a property of the database itself —
+// that `DELETE FROM "Session"` cascades — which no HTTP route exercises, since the app has no
+// delete-session endpoint. Its only caller is the pg_cron job in Supabase (CLAUDE.md "Data
+// retention"), so the statement that job runs is what gets tested here.
 //
 // Requires: Postgres up (podman-compose up -d). Run with: npm run test:integration
 
@@ -58,8 +55,8 @@ describe("data retention — DELETE FROM \"Session\" cascades", () => {
   it("deletes a session that has participants, expenses, splits, and a frozen plan", async () => {
     const { session } = await createFullSession("full");
 
-    // The literal statement the pg_cron job runs, not prisma.session.delete() — the job issues
-    // raw SQL, and a Prisma-only test would not prove the constraint is satisfied in the database.
+    // The literal statement the pg_cron job runs — a prisma.session.delete() would not prove the
+    // constraint is satisfied in the database
     const deleted = await prisma.$executeRawUnsafe(`delete from "Session" where id = $1`, session.id);
 
     expect(deleted).toBe(1);
@@ -78,9 +75,8 @@ describe("data retention — DELETE FROM \"Session\" cascades", () => {
   });
 
   it("deletes a mixed batch in one statement, the way the monthly job does", async () => {
-    // The job deletes by age, not by id, so populated and empty sessions go in the same statement.
-    // A single blocked row rolls the whole thing back — which is exactly how ticket 26 stopped
-    // even the empty sessions from being cleaned up.
+    // The job deletes by age, not by id, so populated and empty sessions go in one statement and
+    // a single blocked row would roll back the whole batch
     await createFullSession("batch-populated");
     await prisma.session.create({ data: { name: `${PREFIX}batch-empty`, participants: { create: [{ name: "solo" }] } } });
 
@@ -89,13 +85,15 @@ describe("data retention — DELETE FROM \"Session\" cascades", () => {
     expect(deleted).toBe(2);
   });
 
-  it("still refuses to delete a participant who is referenced elsewhere", async () => {
-    // The cascade added for ticket 26 is scoped to ExpenseSplit on purpose. Deleting a Participant
-    // directly must still fail loudly rather than silently voiding one side of a payment plan —
-    // the reasoning recorded on Settlement.debtor/creditor in schema.prisma. If this test ever
-    // starts passing a delete through, that decision has been eroded by accident.
-    const { p1 } = await createFullSession("participant-guard");
+  it("still refuses to delete a participant referenced by a settlement", async () => {
+    // The cascade is scoped to ExpenseSplit on purpose: deleting a Participant directly must
+    // still fail loudly rather than silently voiding one side of a payment plan.
+    // p2 is the settlement's debtor and not the expense payer, so Settlement_from_id_fkey is the
+    // constraint that fires — naming it keeps a different FK from satisfying this test by accident.
+    const { p2 } = await createFullSession("participant-guard");
 
-    await expect(prisma.participant.delete({ where: { id: p1.id } })).rejects.toThrow();
+    await expect(prisma.participant.delete({ where: { id: p2.id } })).rejects.toThrow(
+      /Settlement_from_id_fkey/,
+    );
   });
 });

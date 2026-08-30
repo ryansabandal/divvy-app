@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Medium
 Category: Correctness
 
@@ -19,3 +19,17 @@ Fix: extract the P2025 catch-and-404 pattern already present in the expense PATC
 Test gap: the concurrency test at tests/sessions.integration.test.ts:1055 covers a PATCH+DELETE pair (asserting the DELETE path returns 204) but never fires two DELETEs against the same expense, and there is no concurrency test at all for the reorder route. Add both.
 
 Found by: correctness-reviewer, holistic review (2026-08-28).
+
+## Comments
+
+**2026-08-29 — fixed.** Extracted the expense-PATCH catch into `lib/prismaErrors.ts` `isMissingRowError(err)` and applied it to all three routes with the shape.
+
+**Named fork — the two routes get different status codes, on purpose:**
+- expense `PATCH` and `DELETE` → **404** "expense not found in this session", matching each route's own `findFirst` miss two lines above. A raw 500 there was the same outcome reported two different ways.
+- bulk reorder → **400**, reusing the route's existing "expense_ids must include every expense in this session exactly once". A concurrent delete makes the caller's *list* stale, which is a bad request, not a missing resource — and the message already describes exactly that.
+
+The helper returns a boolean rather than a ready-made `NextResponse` precisely because of that fork; a helper that picked the status would have forced one of the two call sites to be wrong.
+
+Verified against real driver-adapter errors, not a hand-built object: P2025 matched, and P2003 (FK violation) correctly fell through to be rethrown — the predicate isn't just swallowing every Prisma error.
+
+Test gap from the ticket (two concurrent DELETEs; a reorder concurrency case) is still open — step 9.

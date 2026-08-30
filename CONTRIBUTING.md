@@ -97,7 +97,9 @@ pooled string is the only one the running app should ever use.
 
 - **TypeScript throughout**, `strict` on.
 - **Comment non-trivial blocks**: every non-obvious line or block gets a one-line
-  comment explaining *what it does and why*, so a first-time reader can follow it.
+  comment explaining *what it does*, so a first-time reader can follow it. Keep
+  rationale, history, and ticket numbers out of the code — those belong in the
+  ticket file or CHANGELOG.md, which is where a reader can act on them.
 - **Validate at the API boundary**: Route Handlers should reject bad input via Zod
   before it reaches Prisma, rather than trusting TypeScript annotations alone.
 - **Keep the settlement algorithm I/O-free**: `lib/settle.ts` is a pure function

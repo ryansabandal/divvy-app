@@ -33,6 +33,9 @@ export function settlementPlansMatch(
   const sortedLive   = [...live].sort((a, b) => key(a).localeCompare(key(b)));
   return sortedFrozen.every((f, i) => {
     const l = sortedLive[i];
-    return !!l && f.from_id === l.from_id && f.to_id === l.to_id && Math.abs(f.amount - l.amount) < 0.01;
+    // Compare as whole centavos — amounts are cent-valued, so this is exact and catches a
+    // one-centavo edit that a float tolerance would round away
+    return !!l && f.from_id === l.from_id && f.to_id === l.to_id
+      && Math.round(f.amount * 100) === Math.round(l.amount * 100);
   });
 }
