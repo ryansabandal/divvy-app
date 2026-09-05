@@ -1,3 +1,5 @@
+import { roundToCents } from "./money";
+
 // Net balance for one participant: positive = owed money, negative = owes money
 export interface ParticipantBalance {
   participantId: string;
@@ -47,7 +49,7 @@ export function computeSettlements(balances: ParticipantBalance[]): SettlementTr
     // Safe: the while guard above already bounds both indices
     const creditor = creditors[i]!;
     const debtor = debtors[j]!;
-    const amount = Math.round(Math.min(creditor.balance, debtor.balance) * 100) / 100;
+    const amount = roundToCents(Math.min(creditor.balance, debtor.balance));
 
     settlements.push({ from_id: debtor.participantId, to_id: creditor.participantId, amount });
 

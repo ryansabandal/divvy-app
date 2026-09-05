@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Low
 Category: Best-Practice
 
@@ -23,3 +23,17 @@ Found by: correctness-reviewer + best-practice-reviewer, holistic review (2026-0
 **Decision to make when picking this up (raised by the 2026-08-30 best-practice review, not yet actioned):** whether to add a peso-facing `distributeAmount(amount, weights)` to `lib/money.ts` wrapping `distributeCents`. Both call sites in `lib/expenseSplits.ts` currently carry the same three-part boilerplate — `Math.round(amount * 100)` in, `/ 100` out, and a `?? 0` on the positional index lookup that only exists to satisfy `noUncheckedIndexedAccess`. A wrapper would delete all three from both sites and keep the array-alignment contract inside the module that can actually guarantee it.
 
 Against: the conversion pair alone is self-evident at two call sites in one file, and correctness confirmed the `?? 0` is unreachable rather than a live risk. Not in this ticket's original written scope either — noted here so it is decided rather than assumed.
+
+## Comments
+
+**2026-09-05 — fixed.** `roundToCents()` added to `lib/money.ts` next to `distributeCents()`. `lib/expenseBreakdown.ts`'s local `toCents()` deleted; its three call sites now import and call the shared `roundToCents()`. `components/ExpenseBreakdown.tsx`'s re-declared `CENT_EPSILON` deleted in favor of importing `RECONCILED_EPSILON` from `@/lib/settle` directly (confirmed safe: `settle.ts` has no `server-only` guard and is already imported client-side transitively via `expenseSplits.ts`).
+
+The bare `0.01` literals in `lib/settlementHelpers.ts` and `app/[sessionId]/page.tsx` were already gone by the time this was picked up — both now use `RECONCILED_EPSILON`/whole-centavo comparison, closed by ticket 01's stale-plan fix. No action needed there.
+
+**Enumerated the class before stopping**, per CONTRIBUTING.md: grepped for every remaining `Math.round(x*100)/100` site. Found one this ticket didn't name — `lib/settle.ts:50`'s settlement-amount rounding — and folded it into `roundToCents()` too rather than leaving a sibling instance to be found by the next review.
+
+**`distributeAmount()` wrapper: declined**, per the "Against" reasoning already on this ticket — the conversion pair is self-evident at the two `lib/expenseSplits.ts` call sites and the `?? 0` guard is confirmed unreachable, not a live risk worth abstracting away.
+
+**Verified by execution, not reasoning:** `npx tsc --noEmit` clean, `npm run lint` unchanged (1 known pre-existing warning, `app/[sessionId]/page.tsx:139`), `npm test` 24/24 — same pass count as before the change, confirming the rename/dedup is behavior-identical rather than just type-checking.
+
+No new tests needed — this is a pure refactor (rename + de-duplication) with no behavior change, covered by the existing `money.test.ts`/`settle.test.ts` suites.

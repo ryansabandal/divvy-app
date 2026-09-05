@@ -1,3 +1,10 @@
+// Rounds to the nearest centavo. The running sums this feeds are additions of already-rounded
+// amounts, so without this they pick up float noise (e.g. 175.00000000000003) and render a
+// misleading figure.
+export function roundToCents(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 // Splits a whole-centavo total into one integer-centavo share per weight, proportional to the
 // weights. Largest-remainder apportionment: floor every exact share, then hand the leftover
 // centavos to the entries that lost the most to that floor. Given non-negative weights that

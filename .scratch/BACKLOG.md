@@ -1,6 +1,6 @@
 # Backlog index
 
-**35 open tickets** (13 actively scheduled or needs-triage/needs-info, 22 demoted to `fix-on-touch`
+**33 open tickets** (12 actively scheduled or needs-triage/needs-info, 21 demoted to `fix-on-touch`
 — see the index near the bottom of this file) across three review directories, grouped by the code
 they touch rather than by
 the review that filed them. The directories stay as they are — they record provenance, and ~200
@@ -16,7 +16,7 @@ three `05`s, three `07`s, two `13`s):
 | `v1` | `v1-hardening-audit/issues/` |
 | `qr` | `v2-qr-ph-upload/issues/` |
 
-Resolved tickets live in each directory's own `issues/resolved/` and are not listed here (39 of them).
+Resolved tickets live in each directory's own `issues/resolved/` and are not listed here (41 of them).
 
 Sequencing, verification commands, and the current resume state live in
 `plans/tier1-review-fixes-27-37.md` (gitignored). This file is the *what*; that one is the *when*.
@@ -38,21 +38,22 @@ to a follow-up that was never filed. File that or explicitly drop it in the same
 ## A · Money precision and rounding
 
 **~~h07~~** · ✅ **resolved 2026-08-30** · negative `amount_owed` from the remainder push
-**[h17](holistic-review-2026-08-28/issues/17-money-util-epsilon-sprawl.md)** · Low · epsilon and rounding sprawl
-**[v1-05](v1-hardening-audit/issues/05-money-rounding-util.md)** · Medium · no money util — **part (a) done**
+**~~h17~~** · ✅ **resolved 2026-09-05** · epsilon and rounding sprawl
+**~~v1-05~~** · ✅ **resolved 2026-09-05** · no money util
 
 h07 shipped `lib/money.ts` `distributeCents()`, called by both the EVEN and QUANTITY branches of
 `buildExpenseSplits()`. That closes v1-05's "factor remainder-distribution into one function" and
 h17's part (a), and removes every `Math.round(x * 100) / 100` from `lib/expenseSplits.ts`. h23
 item 1 (exact `toBe` on the remainder assertions) went with it, as planned.
 
-**What is left in this cluster is one pure-refactor commit.** `roundToCents()` was deliberately
-*not* shipped with h07 — that fix removes its last call site in `expenseSplits.ts`, so it would
-have landed as an unused export (the exact smell ticket 30 was filed for). Add it next to
-`distributeCents()` in the same commit as its real call sites: rename `lib/expenseBreakdown.ts:41`'s
-misnamed `toCents()` (returns pesos, not centavos), drop `components/ExpenseBreakdown.tsx:8`'s
-re-declared `CENT_EPSILON` for an import of `RECONCILED_EPSILON`, and replace the bare `0.01`
-literals in `lib/settlementHelpers.ts` and `app/[sessionId]/page.tsx`.
+**The remaining pure-refactor commit landed 2026-09-05.** `roundToCents()` now lives next to
+`distributeCents()` in `lib/money.ts`; `lib/expenseBreakdown.ts`'s misnamed `toCents()` is gone in
+favor of it; `components/ExpenseBreakdown.tsx`'s re-declared `CENT_EPSILON` is gone in favor of
+importing `RECONCILED_EPSILON` from `lib/settle.ts` directly; `lib/settle.ts:50`'s own
+`Math.round(x*100)/100` (a sibling site not named in either ticket) now calls `roundToCents()` too.
+The bare `0.01` literals in `lib/settlementHelpers.ts` and `app/[sessionId]/page.tsx` had already
+been closed by h06/ticket 01's earlier fixes — no action needed there. This closes cluster A
+entirely; both tickets' full resolution notes are in their respective `issues/resolved/`.
 
 **Carry forward:** `distributeCents()` guarantees an exact sum *in centavos*. Peso sums are still
 floats — the 18-way ₱1.00 split adds up to `1.0000000000000004` — so check the specific addition
@@ -211,8 +212,8 @@ encodes the `/` separators and breaks every valid path. Remediation follows the 
 
 1. ~~**A** — h07 with its helper in `lib/money.ts`, plus h23 item 1.~~ ✅ done 2026-08-30.
 2. ~~**D** — h38.~~ ✅ done 2026-09-05, piloting the new review-workflow rules.
-3. **A** — the h17 remainder, as its own refactor commit. ← **next**
-4. **B** — h08 + h09 + h23 items 2/3, once the `orderBy` decision is made.
+3. ~~**A** — the h17 remainder, as its own refactor commit.~~ ✅ done 2026-09-05.
+4. **B** — h08 + h09 + h23 items 2/3, once the `orderBy` decision is made. ← **next**
 5. ~~**D** — h10, h37, h21.~~ demoted to `fix-on-touch` 2026-09-05 (see the index below) — no longer
    a scheduled step. **F** (h16, v1-07, h19) is similarly demoted.
 6. Decisions: **C** (h36 direction), **G** (h11 wire contract), then **E** with a plan.
@@ -251,7 +252,6 @@ this list was built by grepping for "deliberate decision" / "judgment call" /
 | `app/api/sessions/[sessionId]/settlements/route.ts` | (h08, h09 — not demoted, see above) |
 | `lib/expenseSession.ts` | h10 — **trap:** keep `_count: { select: { expenses: true } }`; never resolve a `tsc` error here by deleting the `session._count.expenses` destructure |
 | `lib/fetcher.ts` | h21 |
-| `lib/settle.ts` / `lib/expenseSplits.ts` / `lib/expenseBreakdown.ts` / `components/ExpenseBreakdown.tsx` / `lib/settlementHelpers.ts` | h17 remainder (see cluster A above — this one is scheduled next, not fix-on-touch, despite being Low) |
 | `app/api/sessions/[sessionId]/route.ts` | h11 |
 | `app/api/sessions/[sessionId]/expenses/[expenseId]/route.ts` / participants routes / qr routes | h37 |
 | `prisma/schema.prisma` | h22 (deprecated `nativeEnum`) |
@@ -260,8 +260,4 @@ this list was built by grepping for "deliberate decision" / "judgment call" /
 | `components/PaymentAction.tsx` | (qr-11 not demoted — a trust-model accept/reject decision, see cluster L) |
 | `app/[sessionId]/settle/page.tsx`, `app/[sessionId]/view/page.tsx` | h16, v1-07 |
 | `app/page.tsx` | v1-09, v1-22 |
-| various (see individual tickets) | v1-05, v1-10 |
-
-**Note:** h17's remainder stays independently scheduled (see cluster A) rather
-than demoted — it is next in the suggested order below, not a chore waiting on
-an unrelated touch.
+| various (see individual tickets) | v1-10 |

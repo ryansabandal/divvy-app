@@ -2,10 +2,7 @@
 
 import { useId, useState } from "react";
 import type { ParticipantBreakdown } from "@/lib/expenseBreakdown";
-
-// Half a centavo — mirrors the backend's RECONCILED_EPSILON. Used only to decide whether this
-// payment covers the person's whole net, so float noise doesn't trigger a spurious "partial" note.
-const CENT_EPSILON = 0.005;
+import { RECONCILED_EPSILON } from "@/lib/settle";
 
 // Collapsible "what is this person actually being charged for" panel, rendered under a settlement
 // row on both the settle screen and the read-only view. Shared rather than copy-pasted between the
@@ -38,7 +35,7 @@ export function ExpenseBreakdown({
 
   // The settlement plan is a simplified routing of net balances, so one payment doesn't always
   // cover a person's whole net — when it doesn't, say so rather than letting the numbers look wrong
-  const coversWholeNet = Math.abs(netOwed - rowAmount) <= CENT_EPSILON;
+  const coversWholeNet = Math.abs(netOwed - rowAmount) <= RECONCILED_EPSILON;
 
   return (
     <div>

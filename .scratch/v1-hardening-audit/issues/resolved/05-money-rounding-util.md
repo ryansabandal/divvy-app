@@ -1,4 +1,4 @@
-Status: fix-on-touch (was: backlog (not blocking V1 close))
+Status: resolved
 Severity: Medium
 Category: Best-practice
 
@@ -15,3 +15,5 @@ Fix sketch: a roundToCents() helper + named CENT_EPSILON constant, and factor re
 **2026-08-30, partially done.** The "factor remainder-distribution into one function" half is complete: `lib/money.ts` `distributeCents()` now serves both the EVEN and QUANTITY branches, replacing the two copy-pasted blocks this ticket named. Landed under holistic-review ticket 07, which needed the same function anyway.
 
 Still open here: the `roundToCents()` helper and the epsilon literals. Deliberately not shipped with 07 — after that fix `lib/expenseSplits.ts` has no `Math.round(x * 100) / 100` left, so `roundToCents()` would have landed as an unused export. It goes in the ticket 17 pass, where its call sites (`lib/expenseBreakdown.ts`'s misnamed `toCents()`, `components/ExpenseBreakdown.tsx`'s re-declared `CENT_EPSILON`) change in the same commit.
+
+**2026-09-05, closed.** The ticket 17 pass landed: `roundToCents()` now lives in `lib/money.ts` next to `distributeCents()`, with every remaining `Math.round(x*100)/100` site (including `lib/settle.ts:50`, found by re-grepping the class) calling it instead, and every one-off epsilon literal replaced by an import of `RECONCILED_EPSILON`. Full resolution note on `.scratch/holistic-review-2026-08-28/issues/resolved/17-money-util-epsilon-sprawl.md`. This ticket's full scope is closed.

@@ -1,6 +1,8 @@
 // Shared by the settle and read-only view pages so "what is this person actually being charged
 // for" is computed in exactly one place. Pure — no fetching, no React — so it stays easy to reason about.
 
+import { roundToCents } from "./money";
+
 // Minimal shape this module needs from an expense. Declared structurally (rather than importing a
 // page's interface) so each page's richer local type satisfies it without any casting — the same
 // approach computeNetBalances uses on the backend.
@@ -36,12 +38,6 @@ export interface ParticipantBreakdown {
   netOwed: number; // totalCharged - totalPaid; positive means they still owe this much overall
 }
 
-// Round to centavos — the running sums are additions of already-rounded amounts, so without this
-// the totals can pick up float noise (e.g. 175.00000000000003) and render a misleading figure
-function toCents(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 // Everything one participant is charged for, everything they fronted, and the net of the two.
 // Note this describes a PERSON, not a single settlement payment: the settlement plan is a
 // simplified routing of net balances, so a given payment row often can't be traced back to
@@ -72,8 +68,8 @@ export function buildParticipantBreakdown(
     }
   }
 
-  const totalCharged = toCents(charges.reduce((sum, c) => sum + c.amountOwed, 0));
-  const totalPaid = toCents(payments.reduce((sum, p) => sum + p.amount, 0));
+  const totalCharged = roundToCents(charges.reduce((sum, c) => sum + c.amountOwed, 0));
+  const totalPaid = roundToCents(payments.reduce((sum, p) => sum + p.amount, 0));
 
-  return { charges, payments, totalCharged, totalPaid, netOwed: toCents(totalCharged - totalPaid) };
+  return { charges, payments, totalCharged, totalPaid, netOwed: roundToCents(totalCharged - totalPaid) };
 }
