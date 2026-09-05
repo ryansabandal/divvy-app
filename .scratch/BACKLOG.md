@@ -129,8 +129,16 @@ in the parent) and sign-off before any edit.
 2026-09-05 blanket demotion of open Low tickets, which was written to target sub-five-minute
 opportunistic fixes (CONTRIBUTING.md's "Review findings: what earns a ticket"), not a ~900-line,
 sign-off-required decomposition. User confirmed: restore, don't leave this cluster to be "fixed in
-passing." **The decomposition plan this cluster needs is still not written — that's the actual next
-step**, not yet started.
+passing."
+
+**2026-09-05 — decomposition plan written:** `.scratch/plans/session-page-decomposition.md`.
+Three sequenced slices (shared row + clipboard hook; payment-method editor + QR; expense list +
+form), each its own review boundary. Also folds in h19 (clipboard triplication, cluster F) as part
+of slice 1. Execution is still separate future work — the plan alone is what shipped this session.
+Discovery corrected two of the five tickets' own framing: h15 is not "extract an `ExpenseRow`" —
+`SortableExpenseCard` already exists; the live work is `view/page.tsx`'s duplicate row. h14 closes
+by construction once `ExpenseForm` is extracted, with no `React.memo`/`useCallback` needed. See
+the plan file and each ticket's own comment for detail.
 
 ## F · Frontend: shared extraction outside the big decomposition
 

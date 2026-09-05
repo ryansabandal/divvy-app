@@ -18,3 +18,12 @@ Found by: best-practice-reviewer, holistic review (2026-08-28).
 
 **2026-09-05 — restored from `fix-on-touch`**, alongside h18/h15/qr-12/qr-13; see h18's comment
 for the full reasoning (blanket demotion over-applied to cluster E's large, sign-off-required scope).
+
+**2026-09-05 — no `React.memo`/`useCallback` needed to close this.** Once `ExpenseForm` is
+extracted to own its form state (Slice 3 of `.scratch/plans/session-page-decomposition.md`), a
+keystroke re-renders only `ExpenseForm` — a sibling `ExpenseList` is not re-rendered at all, because
+React re-renders a component when its own state changes or its parent re-renders, never when a
+sibling's state changes. Extraction closes this by construction; the ticket's mechanism paragraph
+prescribing memo/`useCallback` on top would be unverifiable ceremony layered on a fix that's
+already complete. Record this in the resolution note when the fix lands, so a reviewer doesn't
+read the absence of memo/useCallback as an incomplete fix.

@@ -22,3 +22,13 @@ Found by: best-practice-reviewer, holistic review (2026-08-28) — confirming an
 
 **2026-09-05 — restored from `fix-on-touch`**, alongside h18/h14/qr-12/qr-13; see h18's comment
 for the full reasoning (blanket demotion over-applied to cluster E's large, sign-off-required scope).
+
+**2026-09-05 — this ticket's own framing is stale.** Re-reading the current file: `SortableExpenseCard`
+is *already* extracted (`page.tsx:36-121`), so "extract an `ExpenseRow`" as a from-scratch task no
+longer describes the remaining work. The actual gap is narrower and still real: `view/page.tsx:78-103`
+hand-rolls its own row inline, duplicating the split-type label cascade (`page.tsx:101-105` vs
+`view/page.tsx:85-89`) and the per-split list (`:108-118` vs `:92-102`) verbatim. The fix is a shared
+`components/ExpenseRow.tsx` rendering row *contents* only (each page keeps its own `<li>`, since
+`SortableExpenseCard` carries `useSortable` wiring the read-only row doesn't) — `SortableExpenseCard`
+wraps it rather than being replaced by it. Full component contract in
+`.scratch/plans/session-page-decomposition.md`, Slice 1.
