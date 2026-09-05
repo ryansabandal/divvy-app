@@ -1,4 +1,4 @@
-Status: fix-on-touch (was: needs-triage)
+Status: needs-triage
 Severity: Low
 Category: Best-Practice
 
@@ -13,3 +13,12 @@ This is a maintainability finding on its own, and it also causes the performance
 Needs triage — this is the largest single change surfaced in the review and touches most of the file. Needs a decomposition plan (what components, what props, what stays in the parent) before starting, not a direct fix-sketch application.
 
 Found by: best-practice-reviewer, holistic review (2026-08-28).
+
+## Comments
+
+**2026-09-05 — restored from `fix-on-touch`.** Swept into the 2026-09-05 blanket demotion of open
+Low tickets along with h14, h15, qr-12, qr-13; that policy targets sub-five-minute opportunistic
+fixes (CONTRIBUTING.md's "Review findings: what earns a ticket"), which this ticket's own text
+already contradicts ("largest single change... needs a decomposition plan... before starting").
+User confirmed: restore to scheduled status. Still needs the decomposition plan this ticket asks
+for before any edit — that plan is the actual next step, not yet written.

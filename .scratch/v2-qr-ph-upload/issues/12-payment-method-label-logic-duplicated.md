@@ -1,4 +1,4 @@
-Status: fix-on-touch (was: ready-for-agent)
+Status: ready-for-agent
 Severity: Low
 Category: Best-Practice
 
@@ -11,3 +11,10 @@ Location: app/[sessionId]/page.tsx:593, :566-574; components/PaymentAction.tsx:6
 Fix sketch: a small shared `PAYMENT_METHOD_LABELS: Record<PaymentMethodType, string>` map, probably in lib/paymentDetails.ts, imported by all three call sites.
 
 Found by: best-practice-reviewer, Phase G.2 review (2026-08-16).
+
+## Comments
+
+**2026-09-05 — restored from `fix-on-touch`**, alongside h18/h14/h15/qr-13. This ticket lives inside
+the `PaymentMethodEditor` that h18's decomposition extracts — see `.scratch/BACKLOG.md` cluster E —
+so it rides with that cluster's restoration rather than being fixed standalone; see h18's comment
+for the full reasoning.

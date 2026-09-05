@@ -1,6 +1,6 @@
 # Backlog index
 
-**31 open tickets** (10 actively scheduled or needs-triage/needs-info, 21 demoted to `fix-on-touch`
+**31 open tickets** (15 actively scheduled or needs-triage/needs-info, 16 demoted to `fix-on-touch`
 — see the index near the bottom of this file) across three review directories, grouped by the code
 they touch rather than by
 the review that filed them. The directories stay as they are — they record provenance, and ~200
@@ -125,6 +125,13 @@ and the re-render coupling. h15's `ExpenseRow` gets its natural home inside h18'
 Largest change in the backlog. Needs a decomposition plan (what components, what props, what stays
 in the parent) and sign-off before any edit.
 
+**2026-09-05 — restored to scheduled status.** All five tickets here were briefly swept into the
+2026-09-05 blanket demotion of open Low tickets, which was written to target sub-five-minute
+opportunistic fixes (CONTRIBUTING.md's "Review findings: what earns a ticket"), not a ~900-line,
+sign-off-required decomposition. User confirmed: restore, don't leave this cluster to be "fixed in
+passing." **The decomposition plan this cluster needs is still not written — that's the actual next
+step**, not yet started.
+
 ## F · Frontend: shared extraction outside the big decomposition
 
 **[h16](holistic-review-2026-08-28/issues/16-settlementrow-extraction.md)** · Low · `SettlementRow` duplicated between settle and view
@@ -137,12 +144,15 @@ restructuring. All three are shippable today.
 
 ## G · Frontend: data fetching and payload
 
-**[h11](holistic-review-2026-08-28/issues/11-session-get-participant-payload-duplication.md)** · Low · full participant embedded under every payer and split
-**[h12](holistic-review-2026-08-28/issues/12-mutations-discard-response-refetch-graph.md)** · Low · every mutation refetches the whole session graph
+**[h11](holistic-review-2026-08-28/issues/11-session-get-participant-payload-duplication.md)** · Low · full participant embedded under every payer and split — **`fix-on-touch`**
+**[h12](holistic-review-2026-08-28/issues/12-mutations-discard-response-refetch-graph.md)** · Low · every mutation refetches the whole session graph — **`fix-on-touch`**
 
 h12 explicitly builds on h11's characterization of the session GET, and h12's fix reduces how often
-h11's bloated payload is fetched. **h11 is `needs-triage`** — its recommended option changes the wire
-contract and needs confirmation before implementing.
+h11's bloated payload is fetched. **Both demoted to `fix-on-touch` 2026-09-05** (see the index near
+the bottom of this file) — not a scheduled decision anymore. h11's own text still records the two
+mutually-exclusive options for whoever next touches `app/api/sessions/[sessionId]/route.ts`: the
+reviewing agent recommended (a), narrowing the nested `select`, since the wire-contract change it
+requires is mechanical test churn, not a real tradeoff.
 
 ## H · QR display robustness
 
@@ -221,8 +231,10 @@ encodes the `/` separators and breaks every valid path. Remediation follows the 
 3. ~~**A** — the h17 remainder, as its own refactor commit.~~ ✅ done 2026-09-05.
 4. ~~**B** — h08 + h09 + h23 item 3.~~ ✅ done 2026-09-05 (h23 item 2 stays open, `fix-on-touch`).
 5. ~~**D** — h10, h37, h21.~~ demoted to `fix-on-touch` 2026-09-05 (see the index below) — no longer
-   a scheduled step. **F** (h16, v1-07, h19) is similarly demoted.
-6. Decisions: **C** (h36 direction), **G** (h11 wire contract), then **E** with a plan. ← **next**
+   a scheduled step. **F** (h16, v1-07, h19) and **G** (h11, h12) are similarly demoted.
+6. Decisions, either order: **C** (h36 direction, and by extension h13's transaction), and
+   **E**'s decomposition plan (restored to scheduled 2026-09-05 — see cluster E; the plan itself
+   is still unwritten). ← **next**
 7. **K** last, once every cluster above has landed and CLAUDE.md needs a real re-diff.
 
 **H**'s qr-07 and **I**'s h23/qr-06 are demoted to `fix-on-touch`; qr-03 (Medium, `needs-info`) was
@@ -238,9 +250,9 @@ The Low-severity and Best-Practice tickets above are demoted to `fix-on-touch`:
 not scheduled work, no dedicated commit, no dedicated review — fixed in passing
 by whoever next edits the file they live in. This section is an **added index
 by file**; it does not replace the cluster groupings above, which encode real
-ordering constraints (e.g. cluster E's "must be done together") that a by-file
-listing can't express. See CONTRIBUTING.md's "Review findings: what earns a
-ticket" for why these were demoted instead of worked as their own slice.
+ordering constraints that a by-file listing can't express. See CONTRIBUTING.md's
+"Review findings: what earns a ticket" for why these were demoted instead of
+worked as their own slice.
 
 **Excluded from demotion, kept at their scheduled status:** h36 and h13
 (reverse or trade off a deliberate decision — cluster C), h35, h25, and h24
@@ -250,9 +262,15 @@ decision," not a fix — cluster L). Every excluded ticket's own text says so;
 this list was built by grepping for "deliberate decision" / "judgment call" /
 "go/no-go" language across the demoted batch, not by severity alone.
 
+**Also restored to scheduled status, 2026-09-05 (not excluded from the original
+pass — corrected afterward on the user's call):** h18, h14, h15, qr-12, qr-13
+(cluster E) — the blanket demotion was written for sub-five-minute fixes and
+had swept up a ~900-line decomposition that explicitly needs a plan and
+sign-off before any edit. See cluster E above for the full story.
+
 | File | Tickets |
 |---|---|
-| `app/[sessionId]/page.tsx` | h14, h15, h18, h19, h21(client side), qr-12, qr-13 |
+| `app/[sessionId]/page.tsx` | h19, h21(client side) |
 | `app/api/sessions/[sessionId]/expenses/route.ts` | (h13 — not demoted, needs a real tradeoff decision, see cluster C) |
 | `app/api/sessions/[sessionId]/settlements/route.ts` | h23 item 2 |
 | `lib/expenseSession.ts` | h10 — **trap:** keep `_count: { select: { expenses: true } }`; never resolve a `tsc` error here by deleting the `session._count.expenses` destructure |

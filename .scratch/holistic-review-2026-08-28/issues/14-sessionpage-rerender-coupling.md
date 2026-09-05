@@ -1,4 +1,4 @@
-Status: fix-on-touch (was: needs-triage)
+Status: needs-triage
 Severity: Low
 Category: Performance
 
@@ -13,3 +13,8 @@ Mechanism, not estimate: `SortableContext`'s `items={session.expenses.map(e => e
 Needs triage — the fix (extracting `PaymentMethodEditor` and `ExpenseForm` into their own components, each owning its own state) is the same structural change ticket 18 (sessionpage-decomposition) proposes for maintainability reasons; these two tickets should be done together rather than separately; decomposition approach needs sign-off before starting since it touches most of the file.
 
 Found by: best-practice-reviewer, holistic review (2026-08-28).
+
+## Comments
+
+**2026-09-05 — restored from `fix-on-touch`**, alongside h18/h15/qr-12/qr-13; see h18's comment
+for the full reasoning (blanket demotion over-applied to cluster E's large, sign-off-required scope).

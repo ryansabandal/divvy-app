@@ -1,4 +1,4 @@
-Status: fix-on-touch (was: ready-for-agent)
+Status: ready-for-agent
 Severity: Low
 Category: Best-Practice
 
@@ -17,3 +17,8 @@ Failure scenario already happened once: these blocks were edited in lockstep whe
 Fix sketch: extract the label cascade and per-split list into the shared `ExpenseRow` inner component alongside the description/amount/drag-handle work already planned, rather than doing a second pass later.
 
 Found by: best-practice-reviewer, holistic review (2026-08-28) — confirming and expanding CHANGELOG.md's existing top-priority item.
+
+## Comments
+
+**2026-09-05 — restored from `fix-on-touch`**, alongside h18/h14/qr-12/qr-13; see h18's comment
+for the full reasoning (blanket demotion over-applied to cluster E's large, sign-off-required scope).
