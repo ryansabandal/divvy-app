@@ -1,4 +1,4 @@
-Status: backlog (not blocking V1 close)
+Status: fix-on-touch (was: backlog (not blocking V1 close))
 Severity: Low
 Category: Best-practice
 

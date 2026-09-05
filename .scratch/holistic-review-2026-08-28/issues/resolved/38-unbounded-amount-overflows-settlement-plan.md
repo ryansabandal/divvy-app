@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: High
 Category: Security
 
@@ -50,3 +50,19 @@ Related: `lib/money.ts`'s `distributeCents()` documents an exact-sum invariant t
 `quantity` and `units` are `z.number().int().positive()` with no ceiling, while `Expense.quantity` is `int4`. `quantity: 4000000000` passes Zod and every in-app guard, then fails at the Postgres write with `22003` as an **unhandled 500** rather than the 400 every other malformed-input path returns. Impact is limited (Next.js returns a generic error in production, so nothing leaks), but the fix is the same one line: `.max(...)` on both fields, any ceiling under `2_147_483_647`.
 
 Found by: 3-lens review of the ticket 07 slice (2026-08-30), security lens; both consequences re-executed and the stated mechanism for consequence 2 corrected by the orchestrating session.
+
+**2026-09-05 — fixed, piloting the new review-workflow rules (see CONTRIBUTING.md "Review findings: what earns a ticket" / "Before fixing a pattern bug").**
+
+All three parts shipped together as the ticket required:
+- `schemas/sessions.ts`: `amount` capped at `MAX_AMOUNT = 100_000_000`; `quantity` capped at `1_000_000`; `units` capped at `MAX_UNITS = 10_000`.
+- `lib/settle.ts`: `computeSettlements`'s `while` loop now bounded by `creditors.length + debtors.length` iterations.
+
+**Enumerate-the-class caught a sibling the ticket itself missed:** `amount_owed` (CUSTOM splits, `schemas/sessions.ts`) had neither `.finite()` nor `.max()` — weaker than the `amount` field this ticket is about. Fixed in the same commit as `MAX_AMOUNT`, not filed separately.
+
+**Proof of execution, per the new mutation-verification rule:**
+- `lib/settle.test.ts`: added a test with `balance: Infinity` / `-Infinity`. Reverting the loop's iteration bound and running just that test (`npx vitest run lib/settle.test.ts -t "terminates instead of hanging"`) hangs and is killed by an 8s `timeout` — confirmed the test fails for the stated reason before restoring the fix.
+- `tests/sessions.integration.test.ts`: added 4 tests (amount cap, amount_owed cap, quantity cap, units cap) against a running dev server + local Postgres. Reverting the `amount` `.max()` and running just that test fails with `expected 201 to be 400` — confirmed before restoring.
+- Full suites green after restoring: `npx tsc --noEmit` clean, `npm test` 24/24, `npm run test:integration` 99/99.
+- Manual end-to-end check against the running dev server: `amount: 1e308` → `400 {"error":"amount is too large"}`; an at-cap (`100000000`) expense → `201`, and `GET .../settlements` returns a real `amount: 50000000` (not `null`).
+
+Not re-run: the ticket's own 700-concurrent / 200,000-iteration reproductions — the unit test above exercises the same `NaN`-defeats-the-exit-condition mechanism directly on the pure function, which is faster to run and equally conclusive for this fix.

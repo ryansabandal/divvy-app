@@ -1,0 +1,31 @@
+name: CI
+
+# Protects the currently-green baseline (typecheck, lint, unit tests) on every push and PR.
+# Deliberately does not run the integration suite — that needs a running dev server and a
+# database, neither of which exist in this workflow's runner.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Generates the Prisma Client without a live database — needed for tsc/lint/vitest to
+      # resolve @prisma/client's generated types.
+      - run: npx prisma generate
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        # One known pre-existing warning (react-hooks/exhaustive-deps) — no --max-warnings 0
+        # until that's resolved or explicitly suppressed, so this doesn't false-fail on it.
+        run: npm run lint
+      - name: Unit tests
+        run: npm test

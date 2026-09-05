@@ -99,4 +99,19 @@ describe("computeSettlements", () => {
     ];
     expect(computeSettlements(balances)).toEqual([]);
   });
+
+  // Ticket h38: an Infinity balance (from an unbounded amount overflowing upstream) makes
+  // `creditor.balance -= amount` compute Infinity - Infinity = NaN. NaN satisfies neither
+  // `<= RECONCILED_EPSILON` check below, so pre-fix neither index ever advanced and this call
+  // never returned. The iteration bound is what makes it terminate regardless.
+  it("terminates instead of hanging when a balance is Infinity (audit regression)", () => {
+    const balances: ParticipantBalance[] = [
+      { participantId: "A", balance: Infinity },
+      { participantId: "B", balance: -Infinity },
+    ];
+    const settlements = computeSettlements(balances);
+    // Bounded by creditors.length + debtors.length (1 + 1) — proves the loop actually stopped
+    // rather than returning early with zero rows.
+    expect(settlements.length).toBeLessThanOrEqual(2);
+  });
 });

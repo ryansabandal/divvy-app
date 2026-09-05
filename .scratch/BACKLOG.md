@@ -1,6 +1,8 @@
 # Backlog index
 
-**36 open tickets** across three review directories, grouped by the code they touch rather than by
+**35 open tickets** (13 actively scheduled or needs-triage/needs-info, 22 demoted to `fix-on-touch`
+— see the index near the bottom of this file) across three review directories, grouped by the code
+they touch rather than by
 the review that filed them. The directories stay as they are — they record provenance, and ~200
 cross-references depend on the current numbering. This file is the grouping; it is a *view*, not a
 move.
@@ -14,7 +16,7 @@ three `05`s, three `07`s, two `13`s):
 | `v1` | `v1-hardening-audit/issues/` |
 | `qr` | `v2-qr-ph-upload/issues/` |
 
-Resolved tickets live in each directory's own `issues/resolved/` and are not listed here (37 of them).
+Resolved tickets live in each directory's own `issues/resolved/` and are not listed here (39 of them).
 
 Sequencing, verification commands, and the current resume state live in
 `plans/tier1-review-fixes-27-37.md` (gitignored). This file is the *what*; that one is the *when*.
@@ -89,12 +91,9 @@ Both `needs-triage`-grade decisions. h36 reverses ticket 28's deliberate choice 
 
 ## D · Route hardening — small, independent, shippable now
 
-**[h38](holistic-review-2026-08-28/issues/38-unbounded-amount-overflows-settlement-plan.md)** ·
-**High** · unbounded `amount` overflows to `Infinity` — **do this one first**.
-A single expense blanks every amount in the settlement plan (`Infinity` serialises to JSON `null`);
-50 of them hang `computeSettlements` in a non-terminating loop and brick the session. Pre-existing,
-not introduced by h07. Fix is one `.max()` on the shared `amount` field in `schemas/sessions.ts`
-plus an iteration bound on the `while` loop in `lib/settle.ts`. Filed 2026-08-30.
+**~~h38~~** · ✅ **resolved 2026-09-05** — unbounded `amount` overflows to `Infinity`, piloted the
+new review-workflow rules (see `issues/resolved/38-...md`). Also fixed the sibling `amount_owed`
+field the ticket itself missed, per the new "enumerate the class" rule.
 
 
 **[h10](holistic-review-2026-08-28/issues/10-loadsessionparticipants-overfetch.md)** · Low · narrow the `include` to `select: { id: true }`
@@ -211,11 +210,58 @@ encodes the `/` separators and breaks every valid path. Remediation follows the 
 ## Suggested order
 
 1. ~~**A** — h07 with its helper in `lib/money.ts`, plus h23 item 1.~~ ✅ done 2026-08-30.
-2. **A** — the h17 remainder, as its own refactor commit. ← **next**
-3. **B** — h08 + h09 + h23 items 2/3, once the `orderBy` decision is made.
-4. **D** — h10, h37, h21. Plus **F** (h16, v1-07, h19), which is independent.
-5. **J** — papercuts.
+2. ~~**D** — h38.~~ ✅ done 2026-09-05, piloting the new review-workflow rules.
+3. **A** — the h17 remainder, as its own refactor commit. ← **next**
+4. **B** — h08 + h09 + h23 items 2/3, once the `orderBy` decision is made.
+5. ~~**D** — h10, h37, h21.~~ demoted to `fix-on-touch` 2026-09-05 (see the index below) — no longer
+   a scheduled step. **F** (h16, v1-07, h19) is similarly demoted.
 6. Decisions: **C** (h36 direction), **G** (h11 wire contract), then **E** with a plan.
-7. **K** last.
+7. **K** last, once every cluster above has landed and CLAUDE.md needs a real re-diff.
 
-**H**, **I** items 4/5/6, and **qr-06** slot in anywhere. **L** is the user's, not an agent's.
+**H**'s qr-07 and **I**'s h23/qr-06 are demoted to `fix-on-touch`; qr-03 (Medium, `needs-info`) was
+never in scope for demotion. **L** is the user's, not an agent's, and none of it is demoted — h35,
+h25, and h24 need a dashboard/production check or a design go/no-go; qr-08 (Medium) was never in
+scope; qr-09 and qr-11 each say outright they need a deliberate decision, not a fix.
+
+---
+
+## Fix-on-touch index (added 2026-09-05)
+
+The Low-severity and Best-Practice tickets above are demoted to `fix-on-touch`:
+not scheduled work, no dedicated commit, no dedicated review — fixed in passing
+by whoever next edits the file they live in. This section is an **added index
+by file**; it does not replace the cluster groupings above, which encode real
+ordering constraints (e.g. cluster E's "must be done together") that a by-file
+listing can't express. See CONTRIBUTING.md's "Review findings: what earns a
+ticket" for why these were demoted instead of worked as their own slice.
+
+**Excluded from demotion, kept at their scheduled status:** h08/h09 (blocked on
+a real ordering decision that costs a migration — cluster B), h36 and h13
+(reverse or trade off a deliberate decision — cluster C), h35, h25, and h24
+(need a dashboard/production check or a design go/no-go external to a code
+edit — cluster L), qr-09 and qr-11 (both explicitly "needs a deliberate
+decision," not a fix — cluster L). Every excluded ticket's own text says so;
+this list was built by grepping for "deliberate decision" / "judgment call" /
+"go/no-go" language across the demoted batch, not by severity alone.
+
+| File | Tickets |
+|---|---|
+| `app/[sessionId]/page.tsx` | h14, h15, h18, h19, h21(client side), qr-12, qr-13 |
+| `app/api/sessions/[sessionId]/expenses/route.ts` | (h13 — not demoted, needs a real tradeoff decision, see cluster C) |
+| `app/api/sessions/[sessionId]/settlements/route.ts` | (h08, h09 — not demoted, see above) |
+| `lib/expenseSession.ts` | h10 — **trap:** keep `_count: { select: { expenses: true } }`; never resolve a `tsc` error here by deleting the `session._count.expenses` destructure |
+| `lib/fetcher.ts` | h21 |
+| `lib/settle.ts` / `lib/expenseSplits.ts` / `lib/expenseBreakdown.ts` / `components/ExpenseBreakdown.tsx` / `lib/settlementHelpers.ts` | h17 remainder (see cluster A above — this one is scheduled next, not fix-on-touch, despite being Low) |
+| `app/api/sessions/[sessionId]/route.ts` | h11 |
+| `app/api/sessions/[sessionId]/expenses/[expenseId]/route.ts` / participants routes / qr routes | h37 |
+| `prisma/schema.prisma` | h22 (deprecated `nativeEnum`) |
+| `tests/*.test.ts` | h23 remainder |
+| `lib/storage.ts` | qr-06, qr-07 (qr-09 not demoted — needs a schema-change decision, see cluster L) |
+| `components/PaymentAction.tsx` | (qr-11 not demoted — a trust-model accept/reject decision, see cluster L) |
+| `app/[sessionId]/settle/page.tsx`, `app/[sessionId]/view/page.tsx` | h16, v1-07 |
+| `app/page.tsx` | v1-09, v1-22 |
+| various (see individual tickets) | v1-05, v1-10 |
+
+**Note:** h17's remainder stays independently scheduled (see cluster A) rather
+than demoted — it is next in the suggested order below, not a chore waiting on
+an unrelated touch.

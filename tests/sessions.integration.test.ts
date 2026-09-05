@@ -563,6 +563,27 @@ describe("POST /api/sessions/:sessionId/expenses — EVEN split", () => {
     expect(status).toBe(400);
     expect(body.error).toBe("paid_by must be a participant in this session");
   });
+
+  // Ticket h38: an unbounded amount overflows to Infinity in lib/settle.ts and corrupts every
+  // settlement plan in the session. This must 400 before it ever reaches Prisma.
+  it("rejects an amount over the max cap", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Way too much",
+        amount: 1e308,
+        paid_by: a.id,
+        split_type: "EVEN",
+        participant_ids: [a.id, b.id],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("amount is too large");
+  });
 });
 
 describe("POST /api/sessions/:sessionId/expenses — CUSTOM split", () => {
@@ -730,6 +751,30 @@ describe("POST /api/sessions/:sessionId/expenses — CUSTOM split", () => {
     expect(status).toBe(400);
     expect(body.error).toBe("each split needs a valid participant_id and a positive amount_owed");
   });
+
+  // Sibling of the EVEN-split amount cap above: amount_owed shares the same overflow risk and
+  // had neither .finite() nor .max() before this fix — the field the h38 ticket itself missed.
+  it("rejects an amount_owed over the max cap", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Way too much",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "CUSTOM",
+        splits: [
+          { participant_id: a.id, amount_owed: 1e308 },
+          { participant_id: b.id, amount_owed: 50 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("amount_owed is too large");
+  });
 });
 
 describe("POST /api/sessions/:sessionId/expenses — QUANTITY split", () => {
@@ -861,6 +906,56 @@ describe("POST /api/sessions/:sessionId/expenses — QUANTITY split", () => {
 
     expect(status).toBe(400);
     expect(body.error).toBe("each split needs a valid participant_id and a positive whole number of units");
+  });
+
+  // Pre-h38, quantity had no ceiling and Expense.quantity is Postgres int4 — an oversized value
+  // passed every in-app guard and only failed at the DB write as an unhandled 500 (code 22003).
+  it("rejects a quantity over the max cap", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "Way too many units",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "QUANTITY",
+        quantity: 4_000_000_000,
+        splits: [
+          { participant_id: a.id, units: 2_000_000_000 },
+          { participant_id: b.id, units: 2_000_000_000 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("quantity is too large");
+  });
+
+  // lib/money.ts's distributeCents() computes totalCents * units — unbounded units leaves the
+  // exact-integer range regardless of the amount cap, so this needs its own ceiling.
+  it("rejects a per-participant units value over the max cap", async () => {
+    const session = await createSessionWithParticipants(2);
+    const [a, b] = session.participants;
+
+    const { status, body } = await api(`/api/sessions/${session.id}/expenses`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: "One participant with way too many units",
+        amount: 100,
+        paid_by: a.id,
+        split_type: "QUANTITY",
+        quantity: 1_000_000,
+        splits: [
+          { participant_id: a.id, units: 1_000_000 },
+          { participant_id: b.id, units: 1 },
+        ],
+      }),
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("units is too large");
   });
 });
 

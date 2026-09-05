@@ -300,19 +300,20 @@ Sessions older than a month are deleted automatically, so old bill-splitting dat
 - **Local dev parity** — the local environment should mirror production as closely as possible; no "works on my machine" gaps
 - **Container runtime:** Podman (not Docker) — use `podman-compose` for compose workflows
 - **Comments:** Every non-trivial line or block gets a simple one-liner comment explaining what it does — code should be readable to someone seeing it for the first time
-- **Code reviews use subagents:** always run a full code review via parallel subagents rather than one inline pass — default is three, split by *lens* (Correctness, Security, Best-Practice/Smells), each auditing the whole repo, consolidated into one severity-ranked report. Splitting by lens (not by area, e.g. frontend/backend) avoids "seam-blindness," where a bug living in the contract between two areas falls in the gap between two reviewers who each only look at one side. Spawn them via the `Agent` tool with `subagent_type: correctness-reviewer`, `security-reviewer`, and `best-practice-reviewer` (defined in `~/.claude/agents/`, read-only tool access, `correctness-reviewer`/`security-reviewer` pinned to Opus) — not `general-purpose`. Each agent already knows its lens's checklist; the prompt only needs to carry the review's context (see below), not the lens definition.
+- **Code reviews use subagents:** always run a full code review via parallel subagents rather than one inline pass — default is three, split by *lens* (Correctness, Security, Best-Practice/Smells), each auditing the change under review — the diff or commit range, plus the sibling sites of any pattern the diff touches (see "Enumerate the class" in CONTRIBUTING.md) — consolidated into one severity-ranked report. Splitting by lens (not by area, e.g. frontend/backend) avoids "seam-blindness," where a bug living in the contract between two areas falls in the gap between two reviewers who each only look at one side. Spawn them via the `Agent` tool with `subagent_type: correctness-reviewer`, `security-reviewer`, and `best-practice-reviewer` (defined in `~/.claude/agents/`, read-only tool access, `correctness-reviewer`/`security-reviewer` pinned to Opus) — not `general-purpose`. Each agent already knows its lens's checklist; the prompt only needs to carry the review's context (see below), not the lens definition.
 
 ### When to run a review
 
 Reviews fire at **phase/feature boundaries**, not per-change. A boundary is a coherent unit someone can actually judge — not "route 4 of 11 ported."
 
 - **Per-change review is an anti-pattern here.** A reviewer looking at one route mid-port can't check the only thing that matters (does this still match the old behaviour?), and a hook firing on every `Edit` produces noise that trains you to skim. The test suite answers parity continuously; a reviewer answers it worse and at a checkpoint.
+- **A fix commit is not its own review boundary.** A commit whose only job is closing prior review findings gets folded into the fix before it lands — via the same session's judgment, not a fresh review cycle — rather than reviewed afterward as new work. Reviewing a fix's fix is the per-change anti-pattern above, one level removed; see CONTRIBUTING.md's "Review findings: what earns a ticket" for what still warrants filing.
 - **Skip mechanical phases.** Data migrations and file moves are verified by "does the data match" and "does it build," not by reading code.
 - **Highest-value review is the one on the test suite itself** — tests that encode wrong behaviour turn every later phase into false confidence, which is worse than no tests.
 
 ### Reviews must carry their context
 
-Subagents start cold: they have not read the conversation that produced the change. A review prompt **must** state the contract the change was written against — what is meant to stay identical, what is meant to change, and which tickets are deliberately in scope.
+Subagents start cold: they have not read the conversation that produced the change. A review prompt **must** state the contract the change was written against — what is meant to stay identical, what is meant to change, and which tickets are deliberately in scope. It must also state the triage bar: report findings introduced by this diff at any severity, and pre-existing findings only at High or Medium — see CONTRIBUTING.md's "Review findings: what earns a ticket" for why.
 
 Without it, findings are just the reviewer rediscovering decisions already made, and the real findings get lost in that noise.
 

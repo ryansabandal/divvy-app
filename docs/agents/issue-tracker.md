@@ -9,6 +9,8 @@ Issues and specs (you may know a spec as a PRD) for this repo live as markdown f
 - Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` — never a single combined tickets file
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- A resolution note names the command or test that **proved** the behaviour changed, or states explicitly that it was not verified by execution and why. Reasoning is not evidence: ticket 28 (`.scratch/holistic-review-2026-08-28/`) claimed a dead end was closed on reasoning alone, and the next review reproduced it at 700 concurrent requests.
+- A regression test written to close a ticket must be **mutation-verified** — revert the fix, confirm the test fails, and confirm it fails *for the stated reason*. Ticket 29 in that same directory passed for the wrong reason and would have passed identically with the constraint it claimed to guard deleted.
 
 ## When a skill says "publish to the issue tracker"
 

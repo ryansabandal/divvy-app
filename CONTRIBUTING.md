@@ -104,3 +104,32 @@ pooled string is the only one the running app should ever use.
   before it reaches Prisma, rather than trusting TypeScript annotations alone.
 - **Keep the settlement algorithm I/O-free**: `lib/settle.ts` is a pure function
   (no Prisma/DB) so it stays unit-testable; do the I/O in the route.
+
+### Review findings: what earns a ticket
+
+A Low-severity or Best-Practice finding **caused by the change under review** is
+fixed in that same commit, or dropped. It never becomes a ticket file. Filing it
+buys a fix cycle and a review of that fix for work that takes minutes — tickets
+30, 31, 32, 33 and 34 in `.scratch/holistic-review-2026-08-28/` each cost that,
+and 33 closed with no code change at all.
+
+A pre-existing Low found incidentally is dropped, not filed. Only High and Medium
+findings, and Lows that need a decision rather than an edit — or that record a
+trap a future edit would step on — get a ticket. (Ticket h10 in that same
+directory is the live example of the last kind: its "keep `_count`, never delete
+the destructure to quiet `tsc`" note is worth more than the fix itself.)
+
+### Before fixing a pattern bug
+
+Grep for every site matching the shape before editing any of them. The fix note
+lists the sites found, which are in scope, and why any are excluded. Ticket 04
+fixed 3 of 4 read-then-write routes; ticket 27 fixed 1 of the remaining 3 — the
+same bug cost three review cycles because nobody enumerated the class up front.
+
+When a fix writes a scope claim into a comment, **carry the qualifier that makes
+it true**. `prisma/schema.prisma` said "no *route* deletes a Participant"; ticket
+27's fix generalised that into `lib/prismaErrors.ts` as "nothing deletes a
+Participant" — false, the retention cron does — and ticket 37 exists because the
+next reader trusted the comment over the schema. Assert counts exactly (e.g.
+`grep -c`) rather than approximately: ticket 31 said a string appeared 3 times;
+it appeared 4.

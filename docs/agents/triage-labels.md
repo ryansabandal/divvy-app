@@ -13,3 +13,11 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
+
+## Local sixth label
+
+`fix-on-touch` — not scheduled work, and never gets its own commit or review.
+Fixed in passing by whoever next edits the file it lives in. Used for
+Low-severity / Best-Practice findings that survived triage as worth recording
+but not worth a dedicated fix cycle (see CONTRIBUTING.md's "Review findings:
+what earns a ticket").

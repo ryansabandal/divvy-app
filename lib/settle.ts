@@ -36,7 +36,14 @@ export function computeSettlements(balances: ParticipantBalance[]): SettlementTr
   let i = 0;
   let j = 0;
 
-  while (i < creditors.length && j < debtors.length) {
+  // A NaN balance (e.g. from an Infinity - Infinity upstream) satisfies neither `<=` comparison
+  // below, so neither index would ever advance without this bound — load-bearing, not defence in
+  // depth. The loop can never need more than one settlement per remaining creditor+debtor.
+  const maxIterations = creditors.length + debtors.length;
+  let iterations = 0;
+
+  while (i < creditors.length && j < debtors.length && iterations < maxIterations) {
+    iterations++;
     // Safe: the while guard above already bounds both indices
     const creditor = creditors[i]!;
     const debtor = debtors[j]!;
