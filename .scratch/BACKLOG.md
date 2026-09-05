@@ -1,6 +1,6 @@
 # Backlog index
 
-**33 open tickets** (12 actively scheduled or needs-triage/needs-info, 21 demoted to `fix-on-touch`
+**31 open tickets** (10 actively scheduled or needs-triage/needs-info, 21 demoted to `fix-on-touch`
 — see the index near the bottom of this file) across three review directories, grouped by the code
 they touch rather than by
 the review that filed them. The directories stay as they are — they record provenance, and ~200
@@ -16,7 +16,7 @@ three `05`s, three `07`s, two `13`s):
 | `v1` | `v1-hardening-audit/issues/` |
 | `qr` | `v2-qr-ph-upload/issues/` |
 
-Resolved tickets live in each directory's own `issues/resolved/` and are not listed here (41 of them).
+Resolved tickets live in each directory's own `issues/resolved/` and are not listed here (43 of them).
 
 Sequencing, verification commands, and the current resume state live in
 `plans/tier1-review-fixes-27-37.md` (gitignored). This file is the *what*; that one is the *when*.
@@ -61,24 +61,27 @@ before pinning any total with an exact assertion.
 
 ## B · Settlements route: queries and ordering
 
-**[h08](holistic-review-2026-08-28/issues/08-settlements-findmany-no-orderby.md)** · Low · frozen settlements returned with no `orderBy`
-**[h09](holistic-review-2026-08-28/issues/09-settlements-route-redundant-queries.md)** · Low · route re-fetches names it already holds
+**~~h08~~** · ✅ **resolved 2026-09-05** · frozen settlements returned with no `orderBy`
+**~~h09~~** · ✅ **resolved 2026-09-05** · route re-fetches names it already holds
 
-Both rewrite the same two calls: `settlements/route.ts:30-33` (GET) and `:95-98` (POST).
+Both rewrote the same two calls: `settlements/route.ts` GET and POST.
 
-**Coupled through row order, not merely adjacent.** h09 switches POST to `createManyAndReturn`
-(insertion order — the greedy plan's order); h08 sets GET's order. If those differ,
-`tests/sessions.integration.test.ts:1341` breaks the moment a fixture yields 2+ rows, which is
-exactly the latent flakiness h08 predicts. One shared decision.
+**Decision made:** added `sort_order Int @default(autoincrement())` to `Settlement`
+(migration `20260905015358_settlement_sort_order`), matching the existing
+`Participant.sort_order`/`Expense.sort_order` pattern — chosen over the simpler
+`orderBy: { id: "asc" }` so the settle screen keeps the greedy plan's
+largest-debts-first order rather than an arbitrary UUID sort. **Applied locally
+only** — still needs a hand-run against production (port 5432, session mode)
+before the next deploy that ships this route, per CLAUDE.md's deployment notes.
 
-**Blocking decision — h08's suggested fix is not implementable as filed.** `Settlement` has no
-`created_at` and no `sort_order` (verified against `prisma/schema.prisma`), so "the settlement's own
-creation order" does not exist. Real options: `orderBy: { id: "asc" }` (stable but arbitrary — random
-v4 UUIDs — and POST must sort identically), or add `sort_order` to `Settlement` to preserve the
-plan's largest-debts-first order, matching what `Participant`/`Expense` already do. The latter costs
-a migration.
-
-`createManyAndReturn` is confirmed present in the generated client.
+GET now orders both `findMany` calls by `sort_order`; POST uses
+`createManyAndReturn` (no more third re-read query) and explicitly re-sorts its
+result by `sort_order` rather than trusting `RETURNING` row order. Names in
+both come from a `participantsById` map off `session.participants` (already
+loaded), not a `debtor`/`creditor` relation include. Verified by execution:
+built a 2-settlement-row plan, marked one paid, confirmed GET's row order was
+identical before and after the `UPDATE` — the exact scenario h08 was filed for.
+`npm run test:integration` — 99/99. Full notes on each ticket's `resolved/` file.
 
 ## C · Expenses route: cap and reorder under load
 
@@ -163,7 +166,10 @@ alongside the corresponding code fix.
   with still-open h36. Items 5 and 6 always stood alone. Item 5 is the one that matters — a failing
   assertion above the trailing QR `DELETE` leaks a real object into a production-adjacent bucket,
   permanently, and h24 says nothing reclaims it.
-- **Items 2 and 3 → blocked on h08** (cluster B). Item 3 says so outright.
+- **Item 3 → resolved 2026-09-05**, moot now that h08 shipped (cluster B) — order is genuinely
+  guaranteed, no test edit needed. **Item 2 still open** — a real behavior question (should `POST`
+  report `frozen: true` when the computed plan is empty?), deliberately not folded into the
+  ordering/query fix. Still `fix-on-touch`.
 
 qr-06 is independent test-infra work.
 
@@ -213,10 +219,10 @@ encodes the `/` separators and breaks every valid path. Remediation follows the 
 1. ~~**A** — h07 with its helper in `lib/money.ts`, plus h23 item 1.~~ ✅ done 2026-08-30.
 2. ~~**D** — h38.~~ ✅ done 2026-09-05, piloting the new review-workflow rules.
 3. ~~**A** — the h17 remainder, as its own refactor commit.~~ ✅ done 2026-09-05.
-4. **B** — h08 + h09 + h23 items 2/3, once the `orderBy` decision is made. ← **next**
+4. ~~**B** — h08 + h09 + h23 item 3.~~ ✅ done 2026-09-05 (h23 item 2 stays open, `fix-on-touch`).
 5. ~~**D** — h10, h37, h21.~~ demoted to `fix-on-touch` 2026-09-05 (see the index below) — no longer
    a scheduled step. **F** (h16, v1-07, h19) is similarly demoted.
-6. Decisions: **C** (h36 direction), **G** (h11 wire contract), then **E** with a plan.
+6. Decisions: **C** (h36 direction), **G** (h11 wire contract), then **E** with a plan. ← **next**
 7. **K** last, once every cluster above has landed and CLAUDE.md needs a real re-diff.
 
 **H**'s qr-07 and **I**'s h23/qr-06 are demoted to `fix-on-touch`; qr-03 (Medium, `needs-info`) was
@@ -236,8 +242,7 @@ ordering constraints (e.g. cluster E's "must be done together") that a by-file
 listing can't express. See CONTRIBUTING.md's "Review findings: what earns a
 ticket" for why these were demoted instead of worked as their own slice.
 
-**Excluded from demotion, kept at their scheduled status:** h08/h09 (blocked on
-a real ordering decision that costs a migration — cluster B), h36 and h13
+**Excluded from demotion, kept at their scheduled status:** h36 and h13
 (reverse or trade off a deliberate decision — cluster C), h35, h25, and h24
 (need a dashboard/production check or a design go/no-go external to a code
 edit — cluster L), qr-09 and qr-11 (both explicitly "needs a deliberate
@@ -249,7 +254,7 @@ this list was built by grepping for "deliberate decision" / "judgment call" /
 |---|---|
 | `app/[sessionId]/page.tsx` | h14, h15, h18, h19, h21(client side), qr-12, qr-13 |
 | `app/api/sessions/[sessionId]/expenses/route.ts` | (h13 — not demoted, needs a real tradeoff decision, see cluster C) |
-| `app/api/sessions/[sessionId]/settlements/route.ts` | (h08, h09 — not demoted, see above) |
+| `app/api/sessions/[sessionId]/settlements/route.ts` | h23 item 2 |
 | `lib/expenseSession.ts` | h10 — **trap:** keep `_count: { select: { expenses: true } }`; never resolve a `tsc` error here by deleting the `session._count.expenses` destructure |
 | `lib/fetcher.ts` | h21 |
 | `app/api/sessions/[sessionId]/route.ts` | h11 |
