@@ -6,6 +6,7 @@ import { fetcher } from "@/lib/fetcher";
 import { deriveSessionPayer } from "@/lib/sessionPayer";
 import { buildParticipantBreakdown } from "@/lib/expenseBreakdown";
 import { ExpenseBreakdown } from "@/components/ExpenseBreakdown";
+import { ExpenseRow } from "@/components/ExpenseRow";
 import { PaymentAction } from "@/components/PaymentAction";
 import { SessionSummary } from "@/components/SessionSummary";
 import { SessionPayerNote } from "@/components/SessionPayerNote";
@@ -76,30 +77,7 @@ export default function ViewPage() {
             <ul className="flex flex-col gap-3">
               {session.expenses.map((e) => (
                 <li key={e.id} className="card-navy p-4">
-                  <div className="flex justify-between">
-                    <span className="font-semibold text-white">{e.description}</span>
-                    <span className="font-semibold text-white">₱{e.amount.toFixed(2)}</span>
-                  </div>
-                  <p className="mt-1 text-sm text-white/60">
-                    {!derivedSessionPayer && <>Paid by {e.payer.name} · </>}
-                    {e.split_type === "EVEN"
-                      ? "split evenly"
-                      : e.split_type === "QUANTITY" && e.quantity
-                        ? `${e.quantity} units · ₱${(e.amount / e.quantity).toFixed(2)} each`
-                        : "custom split"}
-                  </p>
-                  {/* Per-person breakdown of who owes what for this expense */}
-                  <ul className="mt-2 flex flex-col gap-0.5 text-xs text-white/50">
-                    {e.splits.map((s) => (
-                      <li key={s.id} className="flex justify-between">
-                        <span>
-                          {s.participant.name}
-                          {s.units != null ? ` ×${s.units}` : ""}
-                        </span>
-                        <span>₱{s.amount_owed.toFixed(2)}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <ExpenseRow expense={e} hidePayerName={!!derivedSessionPayer} />
                 </li>
               ))}
             </ul>

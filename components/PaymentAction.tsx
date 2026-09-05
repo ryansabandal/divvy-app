@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { parseBankDetails } from "@/lib/paymentDetails";
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard";
 import type { Participant } from "@/lib/types";
 
 // How the debtor should pay the creditor for one settlement row, based on the creditor's saved
@@ -17,16 +18,10 @@ export function PaymentAction({
   creditor: Participant | undefined;
   creditorName: string;
 }) {
-  // Local to this row — two rows copied within 1.5s can both show "Copied!" at once, which is fine
-  const [copied, setCopied] = useState(false);
+  // Local to this row — two rows copied within the flash window can both show "Copied!" at once
+  const { copied, copy: handleCopy } = useCopyToClipboard();
   // Full-screen QR view — a settle-row thumbnail is too small to actually scan
   const [enlarged, setEnlarged] = useState(false);
-
-  async function handleCopy(text: string) {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
 
   // Escape closes the enlarged view, same as tapping the backdrop or the close button
   useEffect(() => {

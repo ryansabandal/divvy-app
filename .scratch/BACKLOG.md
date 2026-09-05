@@ -70,9 +70,9 @@ Both rewrote the same two calls: `settlements/route.ts` GET and POST.
 (migration `20260905015358_settlement_sort_order`), matching the existing
 `Participant.sort_order`/`Expense.sort_order` pattern — chosen over the simpler
 `orderBy: { id: "asc" }` so the settle screen keeps the greedy plan's
-largest-debts-first order rather than an arbitrary UUID sort. **Applied locally
-only** — still needs a hand-run against production (port 5432, session mode)
-before the next deploy that ships this route, per CLAUDE.md's deployment notes.
+largest-debts-first order rather than an arbitrary UUID sort. **Confirmed applied
+to production 2026-09-05** (Supabase table editor shows `Settlement.sort_order
+int4`) — this file's earlier "applied locally only" was stale; corrected here.
 
 GET now orders both `findMany` calls by `sort_order`; POST uses
 `createManyAndReturn` (no more third re-read query) and explicitly re-sorts its

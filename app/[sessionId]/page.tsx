@@ -27,8 +27,10 @@ import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
 import { compressImage } from "@/lib/imageCompress";
 import { fetcher } from "@/lib/fetcher";
 import { RECONCILED_EPSILON } from "@/lib/settle";
+import { useCopyToClipboard } from "@/lib/useCopyToClipboard";
 import { SessionSummary } from "@/components/SessionSummary";
 import { SessionPayerNote } from "@/components/SessionPayerNote";
+import { ExpenseRow } from "@/components/ExpenseRow";
 import type { Participant, Expense, Session } from "@/lib/types";
 
 // One draggable expense card. Pulled out as its own component (rather than inlined in a .map())
@@ -44,10 +46,7 @@ function SortableExpenseCard({
   onEdit: (expense: Expense) => void;
   onDelete: (expenseId: string) => void;
   isDeleting: boolean;
-  // True once every expense in the session shares one payer — that payer is already named once
-  // under the section heading, so repeating it on every row would be pure noise. Any card whose
-  // expense happens to differ still needs its own "Paid by" (see the mixed-payer check below),
-  // but with a single session payer every card's payer necessarily matches it.
+  // Forwarded straight through to ExpenseRow, which owns the "Paid by" guard this drives.
   hidePayerName: boolean;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
@@ -57,10 +56,12 @@ function SortableExpenseCard({
 
   return (
     <li ref={setNodeRef} style={style} className={`card-navy p-4 ${isDragging ? "opacity-50" : ""}`}>
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-2">
-          {/* Drag handle: only this icon starts a drag, so tapping the card or the edit/delete
-              buttons next to it is never mistaken for the start of a reorder */}
+      <ExpenseRow
+        expense={expense}
+        hidePayerName={hidePayerName}
+        leading={
+          // Drag handle: only this icon starts a drag, so tapping the card or the edit/delete
+          // buttons next to it is never mistaken for the start of a reorder
           <button
             type="button"
             ref={setActivatorNodeRef}
@@ -71,51 +72,31 @@ function SortableExpenseCard({
           >
             ⠿
           </button>
-          <span className="font-semibold text-white">{expense.description}</span>
-        </div>
-        <div className="ml-2 flex shrink-0 items-center gap-2">
-          <span className="font-semibold text-white">₱{expense.amount.toFixed(2)}</span>
-          {/* Edit button: loads this expense into the form below, pre-filled */}
-          <button
-            type="button"
-            onClick={() => onEdit(expense)}
-            aria-label="Edit expense"
-            className="px-1 text-white/40 transition-colors hover:text-teal"
-          >
-            ✎
-          </button>
-          {/* Delete button: small tap target, grays out while the request is in flight */}
-          <button
-            type="button"
-            onClick={() => onDelete(expense.id)}
-            disabled={isDeleting}
-            aria-label="Delete expense"
-            className="px-1 text-white/40 transition-colors hover:text-red-400 disabled:opacity-40"
-          >
-            {isDeleting ? "…" : "✕"}
-          </button>
-        </div>
-      </div>
-      <p className="mt-1 text-sm text-white/60">
-        {!hidePayerName && <>Paid by {expense.payer.name} · </>}
-        {expense.split_type === "EVEN"
-          ? "split evenly"
-          : expense.split_type === "QUANTITY" && expense.quantity
-            ? `${expense.quantity} units · ₱${(expense.amount / expense.quantity).toFixed(2)} each`
-            : "custom split"}
-      </p>
-      {/* Per-person breakdown of who owes what for this one expense */}
-      <ul className="mt-2 flex flex-col gap-0.5 text-xs text-white/50">
-        {expense.splits.map((s) => (
-          <li key={s.id} className="flex justify-between">
-            <span>
-              {s.participant.name}
-              {s.units != null ? ` ×${s.units}` : ""}
-            </span>
-            <span>₱{s.amount_owed.toFixed(2)}</span>
-          </li>
-        ))}
-      </ul>
+        }
+        actions={
+          <>
+            {/* Edit button: loads this expense into the form below, pre-filled */}
+            <button
+              type="button"
+              onClick={() => onEdit(expense)}
+              aria-label="Edit expense"
+              className="px-1 text-white/40 transition-colors hover:text-teal"
+            >
+              ✎
+            </button>
+            {/* Delete button: small tap target, grays out while the request is in flight */}
+            <button
+              type="button"
+              onClick={() => onDelete(expense.id)}
+              disabled={isDeleting}
+              aria-label="Delete expense"
+              className="px-1 text-white/40 transition-colors hover:text-red-400 disabled:opacity-40"
+            >
+              {isDeleting ? "…" : "✕"}
+            </button>
+          </>
+        }
+      />
     </li>
   );
 }
@@ -177,10 +158,10 @@ export default function SessionPage() {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  // Tracks whether the share-link copy button just fired, to show "Copied!" briefly
-  const [copiedShareLink, setCopiedShareLink] = useState(false);
+  // One copy-to-clipboard flow per button, so each can independently show "Copied!"
+  const { copied: copiedShareLink, copy: copyShareLink } = useCopyToClipboard();
   // Same, for the "copy session link" button (this session's own edit URL, so it can be reopened later)
-  const [copiedSessionLink, setCopiedSessionLink] = useState(false);
+  const { copied: copiedSessionLink, copy: copySessionLink } = useCopyToClipboard();
 
   // Payment-method form state: which participant's inline form is open, and its fields.
   // "QR" is a fourth tab alongside the three real PaymentMethodType values — a UI-only concept,
@@ -1012,11 +993,7 @@ export default function SessionPage() {
         {/* Copy this session's own (editable) URL, so it can be pasted somewhere and reopened later */}
         <button
           type="button"
-          onClick={async () => {
-            await navigator.clipboard.writeText(`${window.location.origin}/${sessionId}`);
-            setCopiedSessionLink(true);
-            setTimeout(() => setCopiedSessionLink(false), 2000);
-          }}
+          onClick={() => copySessionLink(`${window.location.origin}/${sessionId}`)}
           className="btn-secondary mt-6"
         >
           {copiedSessionLink ? "Link copied!" : "Copy session link"}
@@ -1025,11 +1002,7 @@ export default function SessionPage() {
         {/* Share a read-only link with participants so they can see what they owe */}
         <button
           type="button"
-          onClick={async () => {
-            await navigator.clipboard.writeText(`${window.location.origin}/${sessionId}/view`);
-            setCopiedShareLink(true);
-            setTimeout(() => setCopiedShareLink(false), 2000);
-          }}
+          onClick={() => copyShareLink(`${window.location.origin}/${sessionId}/view`)}
           className="btn-secondary mt-3"
         >
           {copiedShareLink ? "Link copied!" : "Share view link"}
