@@ -11,6 +11,12 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # prisma.config.ts reads DATABASE_URL eagerly via env(), so even `prisma generate` (which
+      # never opens a connection) throws without one. Local dev never hits this because .env
+      # (git-ignored) always has a real value. This one is never dialed — any well-formed
+      # postgresql:// URL satisfies the config loader.
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
