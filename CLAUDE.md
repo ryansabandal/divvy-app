@@ -183,7 +183,7 @@ The first of the deferred V2 trio (QR Ph upload, receipt OCR, proof-of-payment s
 - Upload flow: `POST .../participants/:participantId/qr` mints a signed Supabase Storage upload URL, the browser PUTs the compressed image straight to Storage, then `PUT .../participants/:participantId/qr` persists the object path (best-effort deleting the replaced object, if any). `DELETE` clears it.
 - Displayed on the settle + read-only view screens via `components/PaymentAction.tsx`, tap-to-enlarge full-screen — a settle-row thumbnail is too small to actually scan.
 - This shipped implementation is a real-world instance of the "V2 File Uploads — Locked Constraints" below, not an exception to them — confirmed by reading `lib/storage.ts` and the `qr` route: signed direct-upload URLs, a server-side Prisma gatekeeper (no Supabase Auth), and public-read storage scoped by session folder.
-- Known open hardening items (a `capture="environment"` UX bug, a couple of security-hardening tickets) live under `.scratch/v2-qr-ph-upload/issues/` — current status in [CHANGELOG.md](CHANGELOG.md).
+- Known open hardening items (a couple of security-hardening tickets) live under `.scratch/v2-qr-ph-upload/issues/` — current status in [CHANGELOG.md](CHANGELOG.md).
 
 ## V2 File Uploads — Locked Constraints
 

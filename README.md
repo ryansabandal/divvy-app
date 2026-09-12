@@ -333,7 +333,7 @@ sequenceDiagram
 - **Path-ownership check** — the `PUT` route 400s unless the client-supplied path matches the exact shape `createQrUploadUrl` mints for this session (`isMintedQrPath()`: an anchored regex of the session's own prefix, then a v4 UUID, then `.jpg`), so a caller can't mint a signed URL in their own session and point another session's participant at it, nor smuggle a traversal segment past a prefix test. The path field is also capped at 200 characters.
 - **One shared slot** (`Participant.qr_object_path`), not one per payment method — a GCash-generated QR scans fine in a bank app (QR Ph interoperability), and supplements `payment_method_type`/`payment_details`, never replaces them.
 - **Public URL derived at read time** — `lib/storageUrl.ts`'s `publicObjectUrl()` builds the public Storage URL from the stored path with no Supabase client and no secret key, kept separate from `lib/storage.ts` so `serialize.ts` doesn't pull the service-role client into its import graph.
-- Known open hardening tickets (a `capture="environment"` mobile-gallery-picker bug, a couple of security-hardening items) live under `.scratch/v2-qr-ph-upload/issues/` — current status in [CHANGELOG.md](CHANGELOG.md).
+- Known open hardening tickets (a couple of security-hardening items) live under `.scratch/v2-qr-ph-upload/issues/` — current status in [CHANGELOG.md](CHANGELOG.md).
 
 **Payment display** — the settle screen reads each row's creditor payment method via a second `useSWR` call to `GET /api/sessions/:sessionId` (shares the SWR cache, so usually instant).
 

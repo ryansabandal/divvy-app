@@ -112,15 +112,21 @@ destructure to quiet the compiler. h37 is a mechanical copy of the settlement PA
 
 **[h18](holistic-review-2026-08-28/issues/18-sessionpage-decomposition.md)** · Low · ~900-line component, four concerns
 **[h14](holistic-review-2026-08-28/issues/14-sessionpage-rerender-coupling.md)** · Low · full list re-render per keystroke
-**[h15](holistic-review-2026-08-28/issues/15-expenserow-extraction-scope.md)** · Low · `ExpenseRow` extraction
 **[qr-12](v2-qr-ph-upload/issues/12-payment-method-label-logic-duplicated.md)** · Low · label mapping across three call sites
-**[qr-13](v2-qr-ph-upload/issues/13-qr-file-input-jsx-duplicated.md)** · Low · QR file-input JSX duplicated
 
 h18 and h14 state outright they must be done together — the same extraction fixes both the file size
-and the re-render coupling. h15's `ExpenseRow` gets its natural home inside h18's structure.
+and the re-render coupling.
 
-**Both qr tickets belong here**, which neither ticket says: qr-12 and qr-13 live inside the
-`PaymentMethodEditor` that h18 extracts. Working them separately means touching that JSX twice.
+**h15 (`ExpenseRow` extraction) and qr-13 (QR file-input JSX) both resolved and pulled out of this
+cluster individually, on the pattern each ticket predicted before h18's decomposition ever starts:**
+h15 shipped as `components/ExpenseRow.tsx` in `75e2f9a`, found stale 2026-09-12 during an unrelated
+doc pass. qr-13 shipped as `components/QrFileInput.tsx` in `4de6022`, pulled forward the same session
+because qr-03's `capture`/`accept` fix would otherwise have needed applying in two places. Neither
+closes h18 itself — both new components are things a future `PaymentMethodEditor`/session-page
+decomposition would *import*, not reshape, so this isn't scope creep into the blocked cluster.
+
+**qr-12 still belongs here**, which the ticket itself doesn't say: it lives inside the
+`PaymentMethodEditor` that h18 extracts. Working it separately means touching that JSX twice.
 
 Largest change in the backlog. Needs a decomposition plan (what components, what props, what stays
 in the parent) and sign-off before any edit.
@@ -165,10 +171,12 @@ requires is mechanical test churn, not a real tradeoff.
 ## H · QR display robustness
 
 **[qr-07](v2-qr-ph-upload/issues/07-dangling-qr-image-no-fallback.md)** · Low · dangling QR renders as a broken image
-**[qr-03](v2-qr-ph-upload/issues/03-qr-upload-capture-environment-blocks-gallery.md)** · Medium · `capture="environment"` may block gallery picking
 
-Both touch the QR `<img>`/input surface in `PaymentAction.tsx` and `app/[sessionId]/page.tsx`.
-qr-03 is `needs-info` — it needs a real device check, and the user asked to confirm before changing it.
+Touches the QR `<img>` surface in `PaymentAction.tsx`.
+
+**qr-03 resolved 2026-09-12** (moved to `issues/resolved/`) — real device confirmed the fix: dropped
+`capture="environment"`, widened `accept` to `image/*`, extracted into `components/QrFileInput.tsx`
+alongside qr-13 (see cluster E below).
 
 ## I · Test suite
 

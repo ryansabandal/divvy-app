@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Low
 Category: Best-Practice
 
@@ -32,3 +32,9 @@ hand-rolls its own row inline, duplicating the split-type label cascade (`page.t
 `SortableExpenseCard` carries `useSortable` wiring the read-only row doesn't) — `SortableExpenseCard`
 wraps it rather than being replaced by it. Full component contract in
 `.scratch/plans/session-page-decomposition.md`, Slice 1.
+
+**2026-09-12 — resolved, discovered stale during an unrelated ticket's doc pass.** `components/ExpenseRow.tsx`
+shipped in commit `75e2f9a` ("Extract shared ExpenseRow and clipboard-copy hook"). Confirmed both
+`app/[sessionId]/page.tsx` and `app/[sessionId]/view/page.tsx` import and render it (`grep -n "ExpenseRow"`
+against both files) — the duplication this ticket flagged no longer exists. This ticket was pulled out of
+cluster E individually, same as qr-13 was for a different reason; see `.scratch/BACKLOG.md` cluster E.

@@ -22,3 +22,11 @@ fixes (CONTRIBUTING.md's "Review findings: what earns a ticket"), which this tic
 already contradicts ("largest single change... needs a decomposition plan... before starting").
 User confirmed: restore to scheduled status. Still needs the decomposition plan this ticket asks
 for before any edit — that plan is the actual next step, not yet written.
+
+**2026-09-12 — two riders resolved and pulled out individually, not as part of this decomposition.**
+h15 (`ExpenseRow`) shipped in `75e2f9a`; qr-13 (QR file-input JSX) shipped in `4de6022`, pulled forward
+because ticket qr-03's fix would otherwise have touched that JSX twice. Both landed as standalone
+components (`components/ExpenseRow.tsx`, `components/QrFileInput.tsx`) that a future
+`PaymentMethodEditor`/decomposition would import, not reshape — so this doesn't reduce what h18 itself
+still needs (the decomposition plan is still unwritten), only removes two items from its rider list.
+Remaining riders: h14, qr-12. See `.scratch/BACKLOG.md` cluster E.
