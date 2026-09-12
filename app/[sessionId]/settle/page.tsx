@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
@@ -142,10 +142,11 @@ export default function SettlePage() {
             <SessionPayerNote payer={derivedSessionPayer} />
 
             <ul className="flex flex-col gap-3">
-              {settlements.map((s) => (
+              {settlements.map((s, index) => (
                 <li
                   key={s.id ?? `${s.from_id}-${s.to_id}`}
-                  className={`card flex flex-col gap-2 p-4 ${s.paid ? "border-teal/20 bg-teal/5" : ""}`}
+                  className={`card enter-fade flex flex-col gap-2 p-4 ${s.paid ? "border-teal/20 bg-teal/5" : ""}`}
+                  style={{ "--i": index } as CSSProperties}
                 >
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-3">

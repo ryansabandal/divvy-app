@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
@@ -95,12 +96,13 @@ export default function ViewPage() {
               <SettlementProgress settlements={settlements} frozen={frozen} />
 
               <ul className="flex flex-col gap-3">
-                {settlements.map((s) => {
+                {settlements.map((s, index) => {
                   const key = s.id ?? `${s.from_id}-${s.to_id}`;
                   return (
                     <li
                       key={key}
-                      className={`card flex flex-col gap-2 p-4 ${s.paid ? "border-teal/20 bg-teal/5" : ""}`}
+                      className={`card enter-fade flex flex-col gap-2 p-4 ${s.paid ? "border-teal/20 bg-teal/5" : ""}`}
+                      style={{ "--i": index } as CSSProperties}
                     >
                       <div className="flex items-center justify-between">
                         <span className={`text-base ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>

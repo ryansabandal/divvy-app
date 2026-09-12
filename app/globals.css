@@ -293,6 +293,20 @@ body {
   }
 }
 
+/* A row fading in with no transform — used where a transformed ancestor would become
+   the containing block for a `position: fixed` descendant (the settlement list:
+   PaymentAction's enlarged-QR overlay renders inside each row with no portal).
+   Same staggering as .enter-rise, opacity only. */
+.enter-fade {
+  opacity: 1;
+  transition: opacity 260ms var(--ease-out);
+  transition-delay: calc(min(var(--i, 0) * 40ms, 240ms));
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
 /* A disclosure panel settling down out of its trigger */
 .panel-reveal {
   opacity: 1;
@@ -355,6 +369,11 @@ body {
   .panel-reveal,
   .overlay-panel {
     transform: none;
+    transition-delay: 0ms;
+  }
+
+  /* No transform to drop — only the stagger delay goes */
+  .enter-fade {
     transition-delay: 0ms;
   }
 
