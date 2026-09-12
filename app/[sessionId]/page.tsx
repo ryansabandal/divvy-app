@@ -31,6 +31,7 @@ import { useCopyToClipboard } from "@/lib/useCopyToClipboard";
 import { SessionSummary } from "@/components/SessionSummary";
 import { SessionPayerNote } from "@/components/SessionPayerNote";
 import { ExpenseRow } from "@/components/ExpenseRow";
+import { QrFileInput } from "@/components/QrFileInput";
 import type { Participant, Expense, Session } from "@/lib/types";
 
 // One draggable expense card. Pulled out as its own component (rather than inlined in a .map())
@@ -682,24 +683,13 @@ export default function SessionPage() {
                             className="h-16 w-16 rounded-lg border border-navy/10 object-contain"
                           />
                           <div className="flex gap-2">
-                            <label className="btn-compact cursor-pointer">
-                              {qrAction === "uploading" ? "Uploading…" : "Replace"}
-                              <input
-                                type="file"
-                                accept="image/jpeg,image/png,image/webp"
-                                capture="environment"
-                                disabled={qrAction !== null}
-                                className="hidden"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  // Resets the input so picking the same file again still fires
-                                  // onChange — without this, re-selecting an identical filename
-                                  // silently does nothing on most browsers
-                                  e.target.value = "";
-                                  if (file) handleQrUpload(p.id, file);
-                                }}
-                              />
-                            </label>
+                            <QrFileInput
+                              label="Replace"
+                              uploading={qrAction === "uploading"}
+                              disabled={qrAction !== null}
+                              className="btn-compact cursor-pointer"
+                              onFile={(file) => handleQrUpload(p.id, file)}
+                            />
                             <button
                               type="button"
                               onClick={() => handleQrRemove(p.id)}
@@ -711,24 +701,13 @@ export default function SessionPage() {
                           </div>
                         </div>
                       ) : (
-                        <label className="btn-compact w-fit cursor-pointer">
-                          {qrAction === "uploading" ? "Uploading…" : "Add QR code"}
-                          <input
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp"
-                            capture="environment"
-                            disabled={qrAction !== null}
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              // Resets the input so picking the same file again still fires
-                              // onChange — without this, re-selecting an identical filename
-                              // silently does nothing on most browsers
-                              e.target.value = "";
-                              if (file) handleQrUpload(p.id, file);
-                            }}
-                          />
-                        </label>
+                        <QrFileInput
+                          label="Add QR code"
+                          uploading={qrAction === "uploading"}
+                          disabled={qrAction !== null}
+                          className="btn-compact w-fit cursor-pointer"
+                          onFile={(file) => handleQrUpload(p.id, file)}
+                        />
                       )
                     ) : activeTab === "BANK_TRANSFER" ? (
                       // Two separate fields — combined on save so only the account number is copied later
