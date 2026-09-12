@@ -11,6 +11,7 @@ export interface BreakdownExpense {
   description: string;
   amount: number;
   payer: { id: string; name: string };
+  quantity: number | null;
   splits: { participant_id: string; amount_owed: number; units: number | null }[];
 }
 
@@ -19,7 +20,9 @@ export interface BreakdownCharge {
   expenseId: string;
   description: string;
   amountOwed: number;
-  units: number | null; // units consumed on a QUANTITY split; null on EVEN/CUSTOM
+  units: number | null; // units consumed, only when the expense has more than one unit to
+  // distinguish; null on EVEN/CUSTOM and on a quantity-1 QUANTITY split, where "×1" would
+  // just restate the amount
   payerName: string; // who fronted this expense, so the reader knows who they're reimbursing
 }
 
@@ -57,7 +60,7 @@ export function buildParticipantBreakdown(
         expenseId: expense.id,
         description: expense.description,
         amountOwed: split.amount_owed,
-        units: split.units,
+        units: expense.quantity !== null && expense.quantity > 1 ? split.units : null,
         payerName: expense.payer.name,
       });
     }

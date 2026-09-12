@@ -92,12 +92,12 @@ export function PaymentAction({
               role="dialog"
               aria-modal="true"
               aria-label={`${creditorName}'s QR code, enlarged`}
-              className="fixed inset-0 z-50 flex items-center justify-center bg-navy/80 p-6"
+              className="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center bg-navy/80 p-6"
               onClick={() => setEnlarged(false)}
             >
               {/* Stops propagation so tapping the image itself doesn't close the overlay before a
                   long-press can register — only the backdrop or the explicit close button do */}
-              <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <div className="overlay-panel relative" onClick={(e) => e.stopPropagation()}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={creditor.qr_code_url}
@@ -108,7 +108,7 @@ export function PaymentAction({
                   type="button"
                   onClick={() => setEnlarged(false)}
                   aria-label="Close"
-                  className="absolute -top-3 -right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white text-navy shadow-md"
+                  className="icon-btn absolute -top-3 -right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white text-navy shadow-md"
                 >
                   ✕
                 </button>

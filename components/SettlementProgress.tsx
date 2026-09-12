@@ -32,7 +32,7 @@ export function SettlementProgress({
         className="h-2 w-full rounded-full bg-navy/10"
       >
         <div
-          className="h-2 rounded-full bg-teal transition-all"
+          className="h-2 rounded-full bg-teal progress-fill"
           style={{ width: `${progressPct}%` }}
         />
       </div>

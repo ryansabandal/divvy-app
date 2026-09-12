@@ -56,47 +56,51 @@ function SortableExpenseCard({
 
   return (
     <li ref={setNodeRef} style={style} className={`card-navy p-4 ${isDragging ? "opacity-50" : ""}`}>
-      <ExpenseRow
-        expense={expense}
-        hidePayerName={hidePayerName}
-        leading={
-          // Drag handle: only this icon starts a drag, so tapping the card or the edit/delete
-          // buttons next to it is never mistaken for the start of a reorder
-          <button
-            type="button"
-            ref={setActivatorNodeRef}
-            {...attributes}
-            {...listeners}
-            aria-label="Reorder expense"
-            className="cursor-grab touch-none px-1 text-white/30 active:cursor-grabbing"
-          >
-            ⠿
-          </button>
-        }
-        actions={
-          <>
-            {/* Edit button: loads this expense into the form below, pre-filled */}
+      {/* enter-rise lives here, not on the <li> — dnd-kit already drives that element's own
+          transform/transition, and a second transform on the same node would fight it */}
+      <div className="enter-rise">
+        <ExpenseRow
+          expense={expense}
+          hidePayerName={hidePayerName}
+          leading={
+            // Drag handle: only this icon starts a drag, so tapping the card or the edit/delete
+            // buttons next to it is never mistaken for the start of a reorder
             <button
               type="button"
-              onClick={() => onEdit(expense)}
-              aria-label="Edit expense"
-              className="px-1 text-white/40 transition-colors hover:text-teal"
+              ref={setActivatorNodeRef}
+              {...attributes}
+              {...listeners}
+              aria-label="Reorder expense"
+              className="cursor-grab touch-none px-1 text-white/30 active:cursor-grabbing"
             >
-              ✎
+              ⠿
             </button>
-            {/* Delete button: small tap target, grays out while the request is in flight */}
-            <button
-              type="button"
-              onClick={() => onDelete(expense.id)}
-              disabled={isDeleting}
-              aria-label="Delete expense"
-              className="px-1 text-white/40 transition-colors hover:text-red-400 disabled:opacity-40"
-            >
-              {isDeleting ? "…" : "✕"}
-            </button>
-          </>
-        }
-      />
+          }
+          actions={
+            <>
+              {/* Edit button: loads this expense into the form below, pre-filled */}
+              <button
+                type="button"
+                onClick={() => onEdit(expense)}
+                aria-label="Edit expense"
+                className="icon-btn px-1 text-white/40 hover:text-teal"
+              >
+                ✎
+              </button>
+              {/* Delete button: small tap target, grays out while the request is in flight */}
+              <button
+                type="button"
+                onClick={() => onDelete(expense.id)}
+                disabled={isDeleting}
+                aria-label="Delete expense"
+                className="icon-btn px-1 text-white/40 hover:text-red-400 disabled:opacity-40"
+              >
+                {isDeleting ? "…" : "✕"}
+              </button>
+            </>
+          }
+        />
+      </div>
     </li>
   );
 }

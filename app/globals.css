@@ -37,6 +37,26 @@
   --color-teal-5:  color-mix(in srgb, var(--color-teal)  5%, transparent);
   --color-teal-20: color-mix(in srgb, var(--color-teal) 20%, transparent);
   --color-teal-40: color-mix(in srgb, var(--color-teal) 40%, transparent);
+
+  /* ─── Motion tokens ───────────────────────────────────────────────────────
+     The built-in CSS easings are too weak to read as intentional. These are
+     stronger variants: --ease-out for anything entering or responding to a
+     press, --ease-in-out for something moving across the screen. Never ease-in
+     on UI — it delays the first frame, which is exactly when the user looks. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* Press feedback. Full-width CTAs use the shallower value: at the app's 384px
+     column, 0.97 contracts a block button by ~11px, which reads as a flinch. */
+  --press-block: 0.985;
+  --press-inline: 0.97;
+
+  /* Two-layer shadows tinted with the ink color — a tight contact shadow plus a
+     wider ambient one. Pure-black shadows read as grey haze against warm cream. */
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--color-navy) 6%, transparent),
+               0 1px 3px color-mix(in srgb, var(--color-navy) 4%, transparent);
+  --shadow-md: 0 2px 4px color-mix(in srgb, var(--color-navy) 5%, transparent),
+               0 8px 20px color-mix(in srgb, var(--color-navy) 9%, transparent);
 }
 
 /* ─── Base styles ───────────────────────────────────────────────────────────
@@ -65,9 +85,12 @@ body {
   line-height: 1.5rem;
   font-weight: 600;
   color: #ffffff;
-  transition: opacity 150ms;
+  transition: opacity 150ms var(--ease-out), transform 140ms var(--ease-out),
+    background-color 150ms var(--ease-out);
 }
 .btn-primary:disabled { opacity: 0.5; }
+/* :not(:disabled) so a button mid-request doesn't answer a tap it won't act on */
+.btn-primary:active:not(:disabled) { transform: scale(var(--press-block)); }
 
 /* Secondary — lower-priority actions: "Share view link", "Recalculate" */
 .btn-secondary {
@@ -82,8 +105,10 @@ body {
   line-height: 1.5rem;
   font-weight: 500;
   color: var(--color-navy);
-  transition: background-color 150ms;
+  transition: background-color 150ms var(--ease-out), transform 140ms var(--ease-out),
+    border-color 150ms var(--ease-out);
 }
+.btn-secondary:active:not(:disabled) { transform: scale(var(--press-block)); }
 
 /* Compact inline — "Copy", "Save" inside small forms */
 .btn-compact {
@@ -94,8 +119,9 @@ body {
   line-height: 1.25rem;
   font-weight: 500;
   color: var(--color-navy);
-  transition: background-color 150ms;
+  transition: background-color 150ms var(--ease-out), transform 140ms var(--ease-out);
 }
+.btn-compact:active:not(:disabled) { transform: scale(var(--press-inline)); }
 
 /* Toggle pill — base style shared by grouped selectors (split type, payment method) */
 .btn-toggle {
@@ -106,8 +132,10 @@ body {
   font-size: 0.875rem;
   line-height: 1.25rem;
   font-weight: 500;
-  transition: background-color 150ms, color 150ms, border-color 150ms;
+  transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out),
+    border-color 150ms var(--ease-out), transform 140ms var(--ease-out);
 }
+.btn-toggle:active { transform: scale(var(--press-inline)); }
 .btn-toggle-active  { background-color: var(--color-navy); border-color: var(--color-navy); color: #ffffff; }
 .btn-toggle-inactive { background-color: #ffffff; border-color: var(--color-navy-20); color: var(--color-navy-60); }
 
@@ -116,7 +144,22 @@ body {
   border-radius: 1rem;
   border: 1px solid var(--color-navy-10);
   background-color: #ffffff;
-  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Tappable card — recent-session links. Presses like a button; the lift is
+   pointer-only, since touch fires hover on tap and would leave it stuck raised. */
+.card-interactive {
+  transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out),
+    border-color 160ms var(--ease-out);
+}
+.card-interactive:active { transform: scale(var(--press-inline)); box-shadow: var(--shadow-sm); }
+@media (hover: hover) and (pointer: fine) {
+  .card-interactive:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-navy-20);
+  }
 }
 
 /* Card — navy variant for expense rows */
@@ -124,7 +167,7 @@ body {
   border-radius: 1rem;
   border: 1px solid transparent;
   background-color: var(--color-navy);
-  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Text input / select */
@@ -137,9 +180,22 @@ body {
   font-size: 1rem;
   line-height: 1.5rem;
   color: var(--color-navy);
+  transition: box-shadow 150ms var(--ease-out), border-color 150ms var(--ease-out);
 }
 .input::placeholder { color: var(--color-navy-30); }
-.input:focus { outline: none; box-shadow: 0 0 0 2px var(--color-teal-40); }
+.input:focus {
+  outline: none;
+  border-color: var(--color-teal-40);
+  box-shadow: 0 0 0 3px var(--color-teal-20);
+}
+
+/* Bare icon buttons — the ✕/✎/⠿ glyphs on expense and participant rows. Deeper
+   press than a labelled button: the tap target is small, so the feedback has to
+   be visible at that size. */
+.icon-btn {
+  transition: color 150ms var(--ease-out), transform 140ms var(--ease-out), opacity 150ms var(--ease-out);
+}
+.icon-btn:active:not(:disabled) { transform: scale(0.88); }
 
 /* ─── Heading serif ─────────────────────────────────────────────────────────
    Instrument Serif, used for user-supplied titles (a session name) only.
@@ -213,4 +269,100 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-navy-50);
+}
+
+/* ─── Entrance primitives ───────────────────────────────────────────────────
+   @starting-style animates an element's first render with no JS and no mount
+   flag. It fires once per element, so a newly added expense animates in while
+   the rows already on screen stay still — which is why this is safe to put on
+   a list that SWR revalidates. Chrome 117+, Safari 17.5+, Firefox 129+; older
+   browsers skip straight to the settled state. */
+
+/* A row easing up into place instead of popping in. Set --i per item to stagger a
+   list; the delay is capped so a long expense list never makes the last row wait —
+   past the cap everything lands together. */
+.enter-rise {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 260ms var(--ease-out), transform 260ms var(--ease-out);
+  transition-delay: calc(min(var(--i, 0) * 40ms, 240ms));
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* A disclosure panel settling down out of its trigger */
+.panel-reveal {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* ─── Overlay ───────────────────────────────────────────────────────────────
+   Full-screen QR view. The panel scales from center, not from a trigger: a
+   modal isn't anchored to the thing that opened it, so origin-awareness would
+   be wrong here. Scale starts at 0.95, never 0 — nothing real appears from
+   nothing. */
+.overlay-backdrop {
+  opacity: 1;
+  backdrop-filter: blur(3px);
+  transition: opacity 200ms var(--ease-out);
+
+  @starting-style { opacity: 0; }
+}
+.overlay-panel {
+  opacity: 1;
+  transform: scale(1);
+  transform-origin: center;
+  transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+/* ─── Settlement progress fill ──────────────────────────────────────────────
+   Animates `width`, not a scaleX transform: the bar is rounded-full, and
+   scaling the X axis would squash its end caps into ovals. Layout cost is
+   real but bounded — one 8px-tall element, repainted only on a checkbox tap. */
+.progress-fill {
+  transition: width 400ms var(--ease-out);
+}
+
+/* ─── Reduced motion ────────────────────────────────────────────────────────
+   Fewer and gentler, not none. Opacity and color transitions stay — they carry
+   meaning. Everything that moves an element through space is dropped. */
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary:active:not(:disabled),
+  .btn-secondary:active:not(:disabled),
+  .btn-compact:active:not(:disabled),
+  .btn-toggle:active,
+  .icon-btn:active:not(:disabled),
+  .card-interactive:active,
+  .card-interactive:hover {
+    transform: none;
+  }
+
+  .enter-rise,
+  .panel-reveal,
+  .overlay-panel {
+    transform: none;
+    transition-delay: 0ms;
+  }
+
+  @starting-style {
+    .enter-rise,
+    .panel-reveal,
+    .overlay-panel { transform: none; }
+  }
+
+  .progress-fill { transition-duration: 0ms; }
 }

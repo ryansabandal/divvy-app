@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getRecentSessions, saveRecentSession, type RecentSession } from "@/lib/recentSessions";
@@ -79,11 +79,11 @@ export default function CreateSessionPage() {
           <section className="mb-8">
             <h2 className="section-label">Your recent sessions</h2>
             <ul className="flex flex-col gap-2">
-              {recentSessions.map((s) => (
-                <li key={s.id}>
+              {recentSessions.map((s, index) => (
+                <li key={s.id} className="enter-rise" style={{ "--i": index } as CSSProperties}>
                   <Link
                     href={`/${s.id}`}
-                    className="card flex w-full items-center justify-between px-4 py-3 text-left text-sm"
+                    className="card card-interactive flex w-full items-center justify-between px-4 py-3 text-left text-sm"
                   >
                     <span className="font-medium text-navy">{s.name}</span>
                     <span className="text-xs text-navy/40">Open →</span>
@@ -127,7 +127,7 @@ export default function CreateSessionPage() {
                   <button
                     type="button"
                     onClick={() => removeParticipant(index)}
-                    className="px-2 text-navy/30 hover:text-red-500 transition-colors"
+                    className="icon-btn px-2 text-navy/30 hover:text-red-500"
                     aria-label="Remove participant"
                   >
                     ✕

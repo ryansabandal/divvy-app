@@ -50,7 +50,7 @@ export function ExpenseBreakdown({
       </button>
 
       {open && (
-        <div id={panelId} className="mt-2 rounded-xl bg-beige px-3 py-2 text-xs">
+        <div id={panelId} className="panel-reveal mt-2 rounded-xl bg-beige px-3 py-2 text-xs">
           <p className="mb-1.5 font-medium text-navy/50">{personName}&apos;s charges</p>
 
           <ul className="flex flex-col gap-1">
