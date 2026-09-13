@@ -3,12 +3,13 @@
 Dated record of what changed, why, and how it was verified — migration phases, hardening audits, and V2 planning notes. For current architecture, see [README.md](README.md); for product scope, see [CLAUDE.md](CLAUDE.md); for local setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 > **Current priority (updated 2026-09-13) — resume the deferred holistic-review work below.**
-> Cluster E Slice 2 (`PaymentMethodEditor` extraction + qr-12) shipped this session, 3-lens
-> reviewed and fixed — see "Cluster E Slice 2" below. Open choices for next session: Cluster E
-> Slice 3 (`ExpenseList`/`ExpenseForm` extraction, `.scratch/plans/session-page-decomposition.md`),
-> writing up the pre-settled QR 08/09/11 decisions, or h36's direction. The animation follow-up
-> work (plans 002-005) was 3-lens reviewed and fixed the same day — see "Animation follow-up
-> sweep" below.
+> Cluster E is now fully shipped: Slice 2 (`PaymentMethodEditor` extraction + qr-12) and Slice 3
+> (`ExpenseList`/`ExpenseForm` extraction, closing h18 + h14) both landed this session, each 3-lens
+> reviewed and fixed — see their dated entries below. `.scratch/plans/session-page-decomposition.md`
+> is fully executed. Open choices for next session: ticket 39 (`handleQrRemove` missing `finally`,
+> filed during Slice 2), writing up the pre-settled QR 08/09/11 decisions, or h36's direction
+> (expense cap unenforced under concurrency). The animation follow-up work (plans 002-005) was
+> 3-lens reviewed and fixed the same day — see "Animation follow-up sweep" below.
 >
 > **Deferred, not dropped — resume now:** the holistic code review fix plan below
 > (updated 2026-08-28). This session ran the full 3-lens subagent review (Correctness/Security/
@@ -249,6 +250,54 @@ this slice.
   `(typeof PAYMENT_TABS)[number]`), and the redundant `"QR"` check was dropped.
 - **Verified after both rounds:** `npx tsc --noEmit` clean, `npx vitest run lib` 28/28, `npm run
   lint` 0 errors (1 pre-existing warning outside the diff).
+
+### Cluster E Slice 3 — `ExpenseList` + `ExpenseForm` extraction, closes h18 + h14 (2026-09-13)
+
+Third and final slice of `.scratch/plans/session-page-decomposition.md`. Extracted the expense list
+(drag-reorder + delete) into `app/[sessionId]/_components/ExpenseList.tsx` and the add/edit form
+into `app/[sessionId]/_components/ExpenseForm.tsx`. `page.tsx` shrank from 788 to ~255 lines (1046
+before Slice 1). `SortableExpenseCard` moved into `ExpenseList.tsx` alongside its only caller.
+
+- **State representation change, deliberate:** the parent's `editingExpenseId: string | null` became
+  `editingExpense: Expense | null`, so `ExpenseForm` can be remounted via a `key` that changes
+  whenever which expense is being edited changes (same pattern as `PaymentMethodEditor`), rather
+  than needing a sync effect or an imperative 8-setter `handleStartEdit` block. `resetForm`'s scope
+  shrank to only the add→add case; edit-mode "reset" now happens by remounting instead.
+- **h14 (full expense-list re-render per keystroke) closed by construction, no memo/useCallback.**
+  `ExpenseList` and `ExpenseForm` are now sibling components; typing in the form's own state can no
+  longer re-render the list, since they no longer share a parent's state for anything keystroke-driven.
+- **v1-09 half-closed as fix-on-touch:** `React.SubmitEvent<HTMLFormElement>` → the idiomatic
+  `React.FormEvent<HTMLFormElement>` in the moved `handleSubmitExpense`. `app/page.tsx`'s copy of the
+  same ticket is untouched, still open.
+- **3-lens review (2026-09-13).** Security: no findings — the four moved `fetch()` calls are
+  byte-for-byte the same requests as before (same URLs/methods/bodies), the delete-confirmation gate
+  is unmoved, and no user-supplied string gained a new injection surface. Best-practice: 4 findings,
+  all fixed, all comment-quality — a "see the ordering note below" cross-reference left dangling in
+  the file it was extracted out of; a comment in the parent narrating "the previous resetForm()"
+  instead of describing current behavior; `resetForm`'s own comment still claimed to be "shared by
+  cancel and add" after cancel stopped calling it (cancel is now a pure remount); and the rationale
+  comment for the delete→clear-editing-expense guard was dropped when that logic became an inline
+  JSX arrow function instead of a named block.
+- **Correctness: 2 introduced Lows, both fixed.** (1) Re-clicking Edit on the *same* expense already
+  open no longer re-seeded the form, since the remount key is keyed only on expense id, which
+  doesn't change on a re-click — any unsaved dirty value or stale error just sat there. Fixed with an
+  `editClickCount` counter, bumped on every Edit click and folded into the key
+  (`` `${editingExpense.id}-${editClickCount}` ``), so a re-click always forces a fresh remount.
+  (2) After a successful edit-mode save, clearing `editingExpense` synchronously (to match the old
+  code's immediate `resetForm()`) meant `ExpenseForm` remounted — and its freshly-mounted `submitting`
+  state reset to `false` — *before* the post-save `mutate()` refetch resolved, so the new blank
+  add-form was interactive against not-yet-fresh session data for one round trip. The original single
+  -component code kept the submit button disabled for that whole window. Fixed by reordering
+  `handleExpenseSubmitted` to `await mutate()` before clearing `editingExpense`, so the still-mounted
+  form (and its `disabled` submit button) survives the entire refetch; only once fresh data is in
+  does the remount to a blank, enabled add-form happen.
+- **Verified:** `npx tsc --noEmit` clean, `npm test` (`vitest run lib`) 28/28, `npm run lint` 0
+  errors (1 pre-existing warning outside the diff), `npm run test:integration` 99/99 against a local
+  dev server. Manual walkthrough via a scripted Playwright session (browser cached from a prior
+  session, invoked through `npx playwright test` without adding it as a project dependency): added
+  an expense in each of the three split modes, confirmed edit pre-fill, Cancel reverting to blank
+  add-mode, delete-while-editing resetting the form, re-click-Edit re-seeding (the fix above), and a
+  pointer-drag reorder surviving a page reload.
 
 ### Serverless migration (complete — 2026-07-26)
 

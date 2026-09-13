@@ -1,4 +1,4 @@
-Status: needs-triage
+Status: resolved
 Severity: Low
 Category: Best-Practice
 
@@ -30,3 +30,11 @@ components (`components/ExpenseRow.tsx`, `components/QrFileInput.tsx`) that a fu
 `PaymentMethodEditor`/decomposition would import, not reshape — so this doesn't reduce what h18 itself
 still needs (the decomposition plan is still unwritten), only removes two items from its rider list.
 Remaining riders: h14, qr-12. See `.scratch/BACKLOG.md` cluster E.
+
+**2026-09-13 — resolved.** Slice 2 (`PaymentMethodEditor` extraction, closes qr-12 too) and Slice 3
+(`ExpenseList`/`ExpenseForm` extraction, closes h14 too) both shipped this session, each 3-lens
+reviewed and fixed. `app/[sessionId]/page.tsx` went from 1046 lines (four unrelated concerns) to
+~255 lines holding only the participant list, session-payer picker, and the two extracted
+components. Verified via `tsc`/lint/unit/integration tests plus a scripted Playwright walkthrough.
+Full detail: CHANGELOG.md's dated "Cluster E Slice 2" and "Cluster E Slice 3" entries,
+`.scratch/plans/session-page-decomposition.md`.

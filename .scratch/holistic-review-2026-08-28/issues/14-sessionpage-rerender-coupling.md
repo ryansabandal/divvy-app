@@ -1,4 +1,4 @@
-Status: needs-triage
+Status: resolved
 Severity: Low
 Category: Performance
 
@@ -27,3 +27,9 @@ sibling's state changes. Extraction closes this by construction; the ticket's me
 prescribing memo/`useCallback` on top would be unverifiable ceremony layered on a fix that's
 already complete. Record this in the resolution note when the fix lands, so a reviewer doesn't
 read the absence of memo/useCallback as an incomplete fix.
+
+**2026-09-13 — resolved, exactly as predicted above.** Slice 3 shipped
+`app/[sessionId]/_components/ExpenseForm.tsx` and `ExpenseList.tsx` as siblings under `page.tsx`;
+no `React.memo`/`useCallback` was added anywhere, and the 3-lens review's correctness lens
+confirmed the two are genuine siblings with no re-render coupling reintroduced. Full detail:
+CHANGELOG.md's dated "Cluster E Slice 3" entry.

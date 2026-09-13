@@ -1,11 +1,14 @@
 # Backlog index
 
-**31 open tickets** (15 actively scheduled or needs-triage/needs-info, 16 demoted to `fix-on-touch`
+**28 open tickets** (12 actively scheduled or needs-triage/needs-info, 16 demoted to `fix-on-touch`
 — see the index near the bottom of this file) across three review directories, grouped by the code
 they touch rather than by
 the review that filed them. The directories stay as they are — they record provenance, and ~200
 cross-references depend on the current numbering. This file is the grouping; it is a *view*, not a
 move.
+
+**2026-09-13:** h18, h14, and qr-12 (cluster E) closed — count updated from 31/15 to 28/12. See
+cluster E below and each ticket's own resolution comment.
 
 Ticket ids below are prefixed by origin, because the numbers collide across directories (there are
 three `05`s, three `07`s, two `13`s):
@@ -108,11 +111,11 @@ No dependencies on anything else. h10 **must keep `_count: { select: { expenses:
 expense cap breaks — `tsc` catches it, but the fix is to keep `_count`, never to delete the
 destructure to quiet the compiler. h37 is a mechanical copy of the settlement PATCH shape.
 
-## E · Frontend: session-page decomposition — BLOCKED on a plan
+## E · Frontend: session-page decomposition — ✅ RESOLVED 2026-09-13
 
-**[h18](holistic-review-2026-08-28/issues/18-sessionpage-decomposition.md)** · Low · ~900-line component, four concerns
-**[h14](holistic-review-2026-08-28/issues/14-sessionpage-rerender-coupling.md)** · Low · full list re-render per keystroke
-**[qr-12](v2-qr-ph-upload/issues/12-payment-method-label-logic-duplicated.md)** · Low · label mapping across three call sites
+**~~h18~~** · ✅ **resolved 2026-09-13** · ~900-line component, four concerns
+**~~h14~~** · ✅ **resolved 2026-09-13** · full list re-render per keystroke
+**~~qr-12~~** · ✅ **resolved 2026-09-13** · label mapping across three call sites (moved to `v2-qr-ph-upload/issues/resolved/`)
 
 h18 and h14 state outright they must be done together — the same extraction fixes both the file size
 and the re-render coupling.
@@ -145,6 +148,11 @@ Discovery corrected two of the five tickets' own framing: h15 is not "extract an
 `SortableExpenseCard` already exists; the live work is `view/page.tsx`'s duplicate row. h14 closes
 by construction once `ExpenseForm` is extracted, with no `React.memo`/`useCallback` needed. See
 the plan file and each ticket's own comment for detail.
+
+**2026-09-13 — all three slices shipped, cluster fully closed.** Slice 1 (`75e2f9a`), Slice 2 and
+Slice 3 (staged, same session) each 3-lens reviewed and fixed. `page.tsx` went from 1046 lines to
+~255. Full detail: CHANGELOG.md's dated "Cluster E Slice 2"/"Cluster E Slice 3" entries, the plan
+file's own Slice 2/3 sections, and each ticket's resolution comment.
 
 ## F · Frontend: shared extraction outside the big decomposition
 
@@ -248,10 +256,9 @@ encodes the `/` separators and breaks every valid path. Remediation follows the 
 4. ~~**B** — h08 + h09 + h23 item 3.~~ ✅ done 2026-09-05 (h23 item 2 stays open, `fix-on-touch`).
 5. ~~**D** — h10, h37, h21.~~ demoted to `fix-on-touch` 2026-09-05 (see the index below) — no longer
    a scheduled step. **F** (h16, v1-07, h19) and **G** (h11, h12) are similarly demoted.
-6. Decisions, either order: **C** (h36 direction, and by extension h13's transaction), and
-   **E**'s decomposition plan (restored to scheduled 2026-09-05 — see cluster E; the plan itself
-   is still unwritten). ← **next**
-7. **K** last, once every cluster above has landed and CLAUDE.md needs a real re-diff.
+6. ~~**E** — the decomposition plan and its three slices.~~ ✅ done 2026-09-13 (see cluster E).
+7. **C** — h36 direction, and by extension h13's transaction. ← **next**
+8. **K** last, once every cluster above has landed and CLAUDE.md needs a real re-diff.
 
 **H**'s qr-07 and **I**'s h23/qr-06 are demoted to `fix-on-touch`; qr-03 (Medium, `needs-info`) was
 never in scope for demotion. **L** is the user's, not an agent's, and none of it is demoted — h35,
