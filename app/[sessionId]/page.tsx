@@ -53,7 +53,12 @@ function SortableExpenseCard({
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: expense.id,
   });
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  // Lift the card while dragging; merged inline because dnd-kit sets `transition` on this node
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: [transition, "box-shadow 160ms var(--ease-out)"].filter(Boolean).join(", "),
+    boxShadow: isDragging ? "var(--shadow-md)" : undefined,
+  };
 
   return (
     <li ref={setNodeRef} style={style} className={`card-navy p-4 ${isDragging ? "opacity-50" : ""}`}>
@@ -608,7 +613,7 @@ export default function SessionPage() {
               sessionPayerLocked/payerPickerForcedOpen above) — the summary tile's "Change" link
               reopens it. */}
           {!sessionPayerLocked && (
-            <>
+            <div className="panel-reveal">
               <label htmlFor="session-payer" className="mb-1.5 block text-sm font-medium text-navy">
                 Who&apos;s fronting the bill?
               </label>
@@ -624,7 +629,7 @@ export default function SessionPage() {
                   </option>
                 ))}
               </select>
-            </>
+            </div>
           )}
 
           <ul className="flex flex-col gap-2">
@@ -656,7 +661,7 @@ export default function SessionPage() {
                   // Save button; QR is a fourth tab that uploads/persists on its own, no Save
                   // needed — the two never mix, so there's no "which method does this QR belong
                   // to" ambiguity.
-                  <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-navy/10 bg-white p-4 shadow-sm">
+                  <div className="panel-reveal mt-2 flex flex-col gap-2 rounded-2xl border border-navy/10 bg-white p-4 shadow-sm">
                     <div className="flex flex-wrap gap-2">
                       {(["GCASH", "MAYA", "BANK_TRANSFER", "QR"] as const).map((tab) => (
                         <button
@@ -818,7 +823,9 @@ export default function SessionPage() {
             {/* Collapsed by default — the session-wide payer picker above already covers the
                 common case, so this only expands when this one expense needs a different payer */}
             {payerOverrideOpen ? (
-              <>
+              /* Restates the form's own flex layout — a bare wrapper would collapse the label
+                 row and select into one flex child and drop the gap between them */
+              <div className="panel-reveal flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <label htmlFor="payer-override" className="text-sm font-medium text-navy">
                     Paid by
@@ -848,7 +855,7 @@ export default function SessionPage() {
                     </option>
                   ))}
                 </select>
-              </>
+              </div>
             ) : (
               <p className="text-sm text-navy/60">
                 Paid by {session.participants.find((p) => p.id === effectivePaidBy)?.name ?? "—"} ·{" "}

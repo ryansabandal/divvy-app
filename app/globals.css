@@ -293,20 +293,6 @@ body {
   }
 }
 
-/* A row fading in with no transform — used where a transformed ancestor would become
-   the containing block for a `position: fixed` descendant (the settlement list:
-   PaymentAction's enlarged-QR overlay renders inside each row with no portal).
-   Same staggering as .enter-rise, opacity only. */
-.enter-fade {
-  opacity: 1;
-  transition: opacity 260ms var(--ease-out);
-  transition-delay: calc(min(var(--i, 0) * 40ms, 240ms));
-
-  @starting-style {
-    opacity: 0;
-  }
-}
-
 /* A disclosure panel settling down out of its trigger */
 .panel-reveal {
   opacity: 1;
@@ -317,6 +303,46 @@ body {
     opacity: 0;
     transform: translateY(-4px);
   }
+}
+
+/* A one-time completion line scaling in — same timing as .overlay-panel, a shade subtler */
+.enter-pop {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* ─── Settlement row ────────────────────────────────────────────────────────
+   Entrance fade plus the paid-state colour change. Never add a transform: the
+   enlarged-QR overlay inside is `position: fixed` with no portal and would be
+   trapped in the row. Keep it one `transition` declaration (a second class would
+   replace it), with the stagger delay on the opacity term only so the paid tint
+   fires immediately. */
+.settlement-row {
+  opacity: 1;
+  transition: opacity 260ms var(--ease-out) calc(min(var(--i, 0) * 40ms, 240ms)),
+    background-color 200ms var(--ease-out), border-color 200ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* Paid tint. A plain class, not bg-/border- utilities — Tailwind's utilities are
+   layered, so the unlayered .card background and border would always win. */
+.settlement-row-paid {
+  border-color: var(--color-teal-20);
+  background-color: var(--color-teal-5);
+}
+
+/* Row name/amount — fades to the muted paid colour on the same 200ms timing as the row */
+.settlement-text {
+  transition: color 200ms var(--ease-out);
 }
 
 /* ─── Overlay ───────────────────────────────────────────────────────────────
@@ -367,20 +393,22 @@ body {
 
   .enter-rise,
   .panel-reveal,
-  .overlay-panel {
+  .overlay-panel,
+  .enter-pop {
     transform: none;
     transition-delay: 0ms;
   }
 
   /* No transform to drop — only the stagger delay goes */
-  .enter-fade {
+  .settlement-row {
     transition-delay: 0ms;
   }
 
   @starting-style {
     .enter-rise,
     .panel-reveal,
-    .overlay-panel { transform: none; }
+    .overlay-panel,
+    .enter-pop { transform: none; }
   }
 
   .progress-fill { transition-duration: 0ms; }

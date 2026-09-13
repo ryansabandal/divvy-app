@@ -16,6 +16,8 @@ export function SettlementProgress({
   const paidAmount = paidSettlements.reduce((sum, s) => sum + s.amount, 0);
   const totalAmount = settlements.reduce((sum, s) => sum + s.amount, 0);
   const progressPct = settlements.length > 0 ? (paidSettlements.length / settlements.length) * 100 : 0;
+  // True only when a non-empty plan is fully paid
+  const isComplete = settlements.length > 0 && paidSettlements.length === settlements.length;
 
   return (
     <div className="mb-6">
@@ -43,6 +45,13 @@ export function SettlementProgress({
         {paidSettlements.length} of {settlements.length} payments settled · ₱
         {paidAmount.toFixed(2)} of ₱{totalAmount.toFixed(2)} transferred
       </p>
+      {/* Its own conditionally-mounted element, not a class toggled on the caption above —
+          @starting-style only fires on mount */}
+      {isComplete && (
+        <p className="enter-pop mt-1.5 text-xs font-medium text-teal">
+          🎉 Everyone&apos;s settled up
+        </p>
+      )}
     </div>
   );
 }

@@ -363,3 +363,14 @@ sequenceDiagram
 - **`components/SessionSummary.tsx`** — a `.bento-grid` tile layout (total bill, participant count, avg/person; a 4th settlement-progress tile appears via the separate `SettlementProgress` component on settle/view) replacing the old thin `{n} people` subtitle line. Shared across the session, settle, and view pages. Labeled "Total bill", not "Total spent" — the settle/view pages also show a smaller "₱X of ₱Y transferred" figure from `SettlementProgress` (money that still has to change hands after netting balances, always ≤ the bill in the common case), and two unexplained peso figures stacked in a money app read as a contradiction if not both named for what they measure.
   - **Stale-plan edge case** — if expenses change after a plan is finalized, `SessionSummary`'s live total and `SettlementProgress`'s frozen total can briefly disagree (caught by `StalePlanBanner`, which the settle/view pages render *above* the summary tiles specifically so the warning is seen before either number, not after).
 - **Motion pass (2026-09-12)** — press feedback on every button (`:active` scale, two depths: `--press-block` for full-width CTAs, `--press-inline` for compact/inline controls, since the same scale factor visibly over-contracts a full-width button), custom eased easings (`--ease-out`/`--ease-in-out`, stronger than the CSS built-ins) rather than defaults, and `@starting-style`-based entrances (new expense rows, the recent-sessions list, the per-person charge breakdown panel) that fire once per element rather than on every SWR revalidation. The QR-enlarge overlay fades/blurs its backdrop and scales its panel from center (a centered dialog, not an anchored popover). `prefers-reduced-motion: reduce` drops every transform while keeping color/opacity transitions. Detail: [CHANGELOG.md](CHANGELOG.md#expense-display-consistency--ui-motion-pass-shipped-2026-09-12).
+- **Animation follow-up (2026-09-12)** — a read-only sweep over what the motion pass above left
+  unanimated found 5 more spots: the settlement plan list now fades in (`.settlement-row`, opacity
+  only — reusing `.enter-rise` would have trapped the QR-enlarge overlay inside the row, since that
+  overlay is `position: fixed` with no portal and `.enter-rise` settles at a non-`none` transform,
+  which becomes the containing block); three payment/payer disclosures now use the existing
+  `.panel-reveal`; a paid row's teal tint (`.settlement-row-paid` — a plain class, since Tailwind's
+  layered `bg-*`/`border-*` utilities lose to the unlayered `.card`) and muted text
+  (`.settlement-text`) ease in instead of snapping; a
+  dragged expense card lifts its shadow; and finishing a plan shows a one-time "🎉 Everyone's settled
+  up" line (`.enter-pop`). Detail, including the mid-implementation cascade fix `.settlement-row`
+  required: [CHANGELOG.md](CHANGELOG.md#animation-follow-up-sweep-5-plans-written-and-executed-2026-09-12).

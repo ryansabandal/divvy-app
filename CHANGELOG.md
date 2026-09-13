@@ -2,7 +2,16 @@
 
 Dated record of what changed, why, and how it was verified — migration phases, hardening audits, and V2 planning notes. For current architecture, see [README.md](README.md); for product scope, see [CLAUDE.md](CLAUDE.md); for local setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-> **Current priority (updated 2026-08-28) — fix every finding from the holistic code review, TOP PRIORITY.** This session ran the full 3-lens subagent review (Correctness/Security/Best-Practice+Performance) against the entire repo, not a diff — the first whole-repo audit since the 2026-07-19 V1 hardening pass. **25 new tickets filed** under `.scratch/holistic-review-2026-08-28/issues/01` through `25`, ranked into a fix plan at `.scratch/plans/idempotent-snacking-hummingbird.md` (also readable at `~/.claude/plans/idempotent-snacking-hummingbird.md`). Headline: the authorization model is correct — every session-scoped route re-verifies ownership against `:sessionId`; no cross-tenant path, no XSS sink, no raw SQL, no leaked secret. The damage is in float comparisons, one missing length cap, and duplication already edited in lockstep twice.
+> **Current priority (updated 2026-09-13) — resume the deferred holistic-review work below.** The
+> animation follow-up work (plans 002-005) was 3-lens reviewed 2026-09-13, its findings fixed, and
+> staged for commit — see "Animation follow-up sweep" below. Open choices for next session: cluster E
+> Slice 2 (`PaymentMethodEditor`/qr-12, `.scratch/plans/session-page-decomposition.md`), writing up
+> the pre-settled QR 08/09/11 decisions, or h36's direction.
+>
+> **Deferred, not dropped — resume now:** the holistic code review fix plan below
+> (updated 2026-08-28). This session ran the full 3-lens subagent review (Correctness/Security/
+> Best-Practice+Performance) against the entire repo, not a diff — the first whole-repo audit since
+> the 2026-07-19 V1 hardening pass. **25 new tickets filed** under `.scratch/holistic-review-2026-08-28/issues/01` through `25`, ranked into a fix plan at `.scratch/plans/idempotent-snacking-hummingbird.md` (also readable at `~/.claude/plans/idempotent-snacking-hummingbird.md`). Headline: the authorization model is correct — every session-scoped route re-verifies ownership against `:sessionId`; no cross-tenant path, no XSS sink, no raw SQL, no leaked secret. The damage is in float comparisons, one missing length cap, and duplication already edited in lockstep twice.
 >
 > **Next session starts with Tier 1** (tickets 01-08, correctness+security bugs) — self-contained fixes, no refactors, no API shape changes:
 > - **01 (High)** — stale-plan detection misses ~89% of one-centavo changes (`Math.abs(a-b) < 0.01` on cent-valued doubles); verified independently across 200,000 cases before filing.
@@ -92,6 +101,81 @@ Uploading a QR code from a mobile browser opened the camera directly, with no wa
 - **Verified:** `npx tsc --noEmit` and lint clean; a repo-wide `grep -rn 'capture='` confirms zero remaining matches. No automated test covers this path — the repo has no browser-level test tooling — so a desktop smoke test (add/replace/remove QR, label/disabled-state behavior unchanged) plus a **real mobile-device retest post-deploy** (photo picker now offers both Photo Library and Take Photo) are the verification of record.
 - Committed and pushed as `4de6022`.
 - Also discovered stale during this session's doc pass and resolved: ticket h15 (`ExpenseRow` extraction, BACKLOG cluster E) had already shipped in `75e2f9a` but was never flipped — confirmed both `app/[sessionId]/page.tsx` and `app/[sessionId]/view/page.tsx` import the shared component.
+
+### Animation follow-up sweep, 5 plans written and executed (2026-09-12)
+
+A read-only `/find-animation-opportunities` sweep over the motion pass above (report at
+`~/.claude/plans/frolicking-scribbling-toucan.md`) found 5 surviving opportunities — the settlement
+plan list still popped in with no transition, three disclosure panels didn't use the existing
+`.panel-reveal` class, the settlement card's paid-state color change snapped instead of easing, a
+dragged expense card had no lift, and a 100%-settled plan had no completion beat. `improve-animations
+plan` turned all 5 into self-contained execution plans at `.scratch/plans/animation-improvements/`
+(001-005 + README), each stamped against commit `3ff8fa7`. All 5 were then executed this session.
+
+- **001 — settlement list entrance.** New opacity-only `.enter-fade` primitive (later renamed, see
+  003) applied to the settlement `<li>` on both settle and view pages. Opacity-only on purpose: the
+  obvious choice, reusing `.enter-rise`, would have made the row the CSS containing block for
+  `PaymentAction`'s enlarged-QR overlay (`position: fixed` with no portal, nested inside the row) —
+  `.enter-rise` settles at `transform: translateY(0)`, which is a containing block; a bare opacity
+  transition is not. **Committed as `9e4b942`.**
+- **002 — `.panel-reveal` on the payment-method + payer disclosures.** JSX-only, no new CSS: the
+  payment-method form and two payer pickers in `app/[sessionId]/page.tsx` now use the same class
+  `components/ExpenseBreakdown.tsx` already had. One site needed care — the payer-override panel
+  sits inside `<form className="flex flex-col gap-3">`, so its wrapper had to restate `flex flex-col
+  gap-3` or the label row and select would silently lose their spacing.
+- **003 — paid-row color transition, with a cascade fix 001 didn't anticipate.** The plan's written
+  approach (add a `transition` to the shared `.card` class) would have silently done nothing:
+  `transition` is a single CSS property, and 001's `.enter-fade` on the same `<li>` — added after
+  003 was planned — would have overridden it by source order, with `tsc`/tests staying green either
+  way. Resolved by renaming `.enter-fade` to `.settlement-row` and merging the entrance fade and the
+  paid-state background/border colors into one declaration, with the stagger delay scoped inside the
+  `transition` shorthand's opacity term specifically (a separate `transition-delay` longhand would
+  have delayed the paid-state tint by up to 240ms, a worse bug than the one being fixed). New
+  `.settlement-text` class for the row's name/amount `<span>`s, which carry only Tailwind utilities
+  and needed a `color` transition of their own. Verified via Lightning CSS directly that the
+  per-property delay survives inside the shorthand rather than being hoisted to a flat
+  `transition-delay`.
+- **004 — drag-pickup shadow.** `SortableExpenseCard`'s inline `style` object (dnd-kit sets
+  `transition` inline on the sortable `<li>`, which silently beats any same-property CSS class rule)
+  now merges in `box-shadow 160ms var(--ease-out)` and raises to `--shadow-md` while `isDragging`.
+  Confirmed against the installed `@dnd-kit/sortable` type declarations that its own `transition` can
+  be `undefined`, which is why the merge guards with `.filter(Boolean)`.
+- **005 — settlement completion beat.** New `.enter-pop` primitive (scale 0.96→1 + opacity, 220ms) and
+  a conditionally-mounted "🎉 Everyone's settled up" line in `components/SettlementProgress.tsx` when
+  every row in a non-empty plan is paid. Deliberately mount-only, no `isExiting`/`wasIncomplete` state
+  machine — same call already made for the QR overlay's exit animation above. Checked the component's
+  own `aria-valuetext`-stays-in-sync-with-the-caption convention before adding a second visible line:
+  it doesn't apply here, since the new line is a separate element in the reading order and doesn't
+  touch either of the two strings that convention binds together.
+- **Verified per plan:** `npx tsc --noEmit`, `npx vitest run lib` (28/28), and `npm run lint` clean
+  after each of the 5. Feel-checked in a browser afterward (QR-overlay full-screen regression, the
+  payer-override panel's `gap-3` spacing, drag lift, reduced-motion) and confirmed working.
+- **Land as one commit:** 002-005 (001 is `9e4b942`) — 002/004 both touch `app/[sessionId]/page.tsx`
+  and 003/005 both touch `app/globals.css`, so the plans no longer split cleanly by file path.
+- **3-lens review (2026-09-13)** of the 002-005 diff, with 003's cascade fix carried as settled context.
+  Security: no findings. Best-practice: four Lows (split/misplaced settlement CSS rules, an `.enter-pop`
+  comment naming the wrong twin primitive, an over-long `.settlement-row` comment, two TSX comments —
+  one duplicated, one asserting facts about other files), all fixed in place.
+- **Correctness found a Medium that predates this work: the paid settlement row's teal tint had never
+  rendered.** Tailwind v4 emits utilities inside `@layer utilities`, and every hand-written class in
+  `app/globals.css` is unlayered — unlayered CSS beats layered CSS regardless of specificity, so
+  `.card`'s white background and navy border silently overrode `bg-teal/5 border-teal/20` on the
+  settle + view rows. 003's background/border transition therefore animated nothing; only the text
+  fade was ever visible. Confirmed in headless Chromium (paid and unpaid rows both computed
+  `rgb(255,255,255)`). Fixed with an unlayered `.settlement-row-paid` class after `.card`, replacing
+  the utilities at both call sites; a repo-wide search found no other component class sharing an
+  element with a conflicting colour utility. **Trap for future edits:** a Tailwind colour/border
+  utility placed alongside any component class here (`.card`, `.bento-tile`, `.input`, `.btn-*`)
+  loses to it — express the variant as a plain class instead. Wrapping the component classes in
+  `@layer components` would fix this globally but was not done: it would flip every existing
+  utility-vs-component conflict app-wide at once.
+- **Debugging detour, not a code bug:** retesting the fix first showed "Failed to update payment" and
+  no tint. Both traced to a stale Turbopack cache in `.next` — the served CSS was the previous day's,
+  and every nested session route (`settlements/:id`, `expenses/:id`, `participants/:id`) 404'd to
+  `/_not-found` HTML, which the settle page's `res.json()` can't parse. Stopping dev, `rm -rf .next`,
+  and restarting fixed both. No build had run alongside dev this time, so the trigger is unknown.
+- **Verified after fixes:** `npx tsc --noEmit` clean, `npx vitest run lib` 28/28, `npm run lint` 0 errors
+  (1 pre-existing warning outside the diff); paid tint + fade confirmed in a browser by the user.
 
 ### Serverless migration (complete — 2026-07-26)
 

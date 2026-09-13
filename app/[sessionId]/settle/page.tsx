@@ -145,7 +145,7 @@ export default function SettlePage() {
               {settlements.map((s, index) => (
                 <li
                   key={s.id ?? `${s.from_id}-${s.to_id}`}
-                  className={`card enter-fade flex flex-col gap-2 p-4 ${s.paid ? "border-teal/20 bg-teal/5" : ""}`}
+                  className={`card settlement-row flex flex-col gap-2 p-4 ${s.paid ? "settlement-row-paid" : ""}`}
                   style={{ "--i": index } as CSSProperties}
                 >
                   <div className="flex items-center justify-between">
@@ -159,13 +159,13 @@ export default function SettlePage() {
                           className="accent-teal"
                         />
                       )}
-                      <span className={`text-base ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
+                      <span className={`settlement-text text-base ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
                         <span className="font-semibold">{s.from_name}</span>
                         <span className="text-navy/30"> → </span>
                         <span className="font-semibold">{s.to_name}</span>
                       </span>
                     </label>
-                    <span className={`font-semibold ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
+                    <span className={`settlement-text font-semibold ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
                       ₱{s.amount.toFixed(2)}
                     </span>
                   </div>
