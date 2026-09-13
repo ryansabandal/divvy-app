@@ -1,3 +1,15 @@
+import type { PaymentMethodType } from "./types";
+
+// Shared label for each payment method type. BANK_TRANSFER's own display label is never this
+// generic "Bank" value — it prefers the participant's actual stored bank name (see
+// components/PaymentAction.tsx) — so this entry only ever serves as that fallback plus the
+// payment-method tab/status text, which don't have a bank name to show.
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethodType, string> = {
+  GCASH: "GCash",
+  MAYA: "Maya",
+  BANK_TRANSFER: "Bank",
+};
+
 // The stored encoding for a BANK_TRANSFER payment method: "Bank Name - Account Number".
 // One home for this format so all call sites agree on the separator instead of each
 // re-deriving it (a silent mismatch would corrupt bank details across the app).

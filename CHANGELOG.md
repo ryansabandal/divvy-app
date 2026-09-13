@@ -2,11 +2,13 @@
 
 Dated record of what changed, why, and how it was verified — migration phases, hardening audits, and V2 planning notes. For current architecture, see [README.md](README.md); for product scope, see [CLAUDE.md](CLAUDE.md); for local setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-> **Current priority (updated 2026-09-13) — resume the deferred holistic-review work below.** The
-> animation follow-up work (plans 002-005) was 3-lens reviewed 2026-09-13, its findings fixed, and
-> staged for commit — see "Animation follow-up sweep" below. Open choices for next session: cluster E
-> Slice 2 (`PaymentMethodEditor`/qr-12, `.scratch/plans/session-page-decomposition.md`), writing up
-> the pre-settled QR 08/09/11 decisions, or h36's direction.
+> **Current priority (updated 2026-09-13) — resume the deferred holistic-review work below.**
+> Cluster E Slice 2 (`PaymentMethodEditor` extraction + qr-12) shipped this session, 3-lens
+> reviewed and fixed — see "Cluster E Slice 2" below. Open choices for next session: Cluster E
+> Slice 3 (`ExpenseList`/`ExpenseForm` extraction, `.scratch/plans/session-page-decomposition.md`),
+> writing up the pre-settled QR 08/09/11 decisions, or h36's direction. The animation follow-up
+> work (plans 002-005) was 3-lens reviewed and fixed the same day — see "Animation follow-up
+> sweep" below.
 >
 > **Deferred, not dropped — resume now:** the holistic code review fix plan below
 > (updated 2026-08-28). This session ran the full 3-lens subagent review (Correctness/Security/
@@ -176,6 +178,77 @@ plan` turned all 5 into self-contained execution plans at `.scratch/plans/animat
   and restarting fixed both. No build had run alongside dev this time, so the trigger is unknown.
 - **Verified after fixes:** `npx tsc --noEmit` clean, `npx vitest run lib` 28/28, `npm run lint` 0 errors
   (1 pre-existing warning outside the diff); paid tint + fade confirmed in a browser by the user.
+
+### Cluster E Slice 2 — `PaymentMethodEditor` extraction + qr-12 shared labels (2026-09-13)
+
+Second of three sequenced boundaries in `.scratch/plans/session-page-decomposition.md`. Extracted
+the whole GCash/Maya/Bank/QR payment-method editor (~180 lines: 6 state hooks, 3 handlers, the tab
+UI) out of `app/[sessionId]/page.tsx` into `app/[sessionId]/_components/PaymentMethodEditor.tsx`,
+taking `{ sessionId, participant, mutate, onClose }` as props. `page.tsx` shrank from 1008 to 788
+lines. qr-13 (`QrFileInput` extraction) had already shipped separately (`4de6022`) — not part of
+this slice.
+
+- **Seeding moved from an imperative click-handler to `useState` lazy initializers.** The old
+  `toggleExpandParticipant` wrote all six pieces of state by hand when a row expanded; now
+  `PaymentMethodEditor` mounts fresh per participant (parent renders it only while
+  `expandedParticipantId === p.id`, with `key={p.id}`) and each field seeds itself straight from
+  the `participant` prop. No sync effect needed, and "form shows the previous participant's data"
+  is unrepresentable by construction.
+- **`onClose`/`mutate` kept as two separate props, not one**, to preserve a real pre-existing
+  behavior difference: Save collapses the row (`onClose()` then `mutate()`), but a QR upload/remove
+  never did (`mutate()` only) — a single combined callback would have silently started collapsing
+  the row on every QR action.
+- **qr-12 closed:** `PAYMENT_METHOD_LABELS: Record<PaymentMethodType, string>` added to
+  `lib/paymentDetails.ts`, applied at all three sites the ticket named (collapsed-row status text,
+  the tab-button labels, and `PaymentAction.tsx`'s GCash/Maya line). `PaymentAction.tsx`'s
+  `BANK_TRANSFER` arm deliberately keeps its own `bankName || "Bank"` fallback — the map is not
+  applied there, since that would replace a real bank name with the generic word "Bank" on the
+  settle/view screens.
+- **3-lens review (2026-09-13).** Security: no findings — confirmed the extraction moves no new
+  module into the client bundle, doesn't change any server-side authorization check (every write
+  route re-validates `participantId` against `sessionId` regardless of what the client sends), and
+  the QR signed-upload flow is byte-for-byte unchanged. Best-practice: 4 findings, all fixed —
+  the tab-button labels had been copied verbatim without wiring to the new map (drift risk between
+  two label sources); a `setSavingPaymentMethod(false)` after the Save-success `onClose()` was dead
+  code (the component unmounts before that line's effect would matter); a comment on `onClose`
+  narrated the refactor itself instead of the current contract; the bank-details seeding computed a
+  throwaway object every render instead of using true lazy `useState` initializers.
+- **Correctness: 1 Medium (pre-existing, filed as ticket 39, not fixed in this diff) + 1 Low
+  (introduced, fixed).** `handleQrRemove` has no `finally`, so a rejected DELETE or refetch strands
+  the QR controls disabled forever — identical to the pre-extraction code, filed rather than folded
+  into this refactor so the extraction's own "behavior unchanged" claim stays independently
+  verifiable. The introduced Low: collapsing a row's QR editor while an upload is still in flight
+  now silently swallows a later failure, since the error state is local and unmounts with the row —
+  accepted as a documented tradeoff of isolating each row's state (the old shared page-level state
+  had the opposite bug, misattributing the error to whichever row was open when it resolved) rather
+  than reintroducing a page-level error channel just to preserve a worse failure mode.
+- **User-caught during the manual walkthrough, fixed same session:** the GCash/Maya "phone number"
+  field and the Bank tab's "account number" field shared one text-state variable — pre-existing
+  since before this extraction, not introduced by it, but only surfaced once someone actually
+  clicked through the tabs. Switching tabs left whatever was typed sitting in the next tab's field
+  under a different label. First fix: reset both fields on every tab switch, reseeded from the
+  participant's saved value for that specific tab (blank otherwise).
+- **That fix got its own follow-up 3-lens review, which found it was too broad.** Security: clean
+  (net-positive — closes a case where a payment identifier could land in the wrong field).
+  Correctness: 1 Medium — re-tapping the *already-active* tab silently wiped whatever was just
+  typed (no `tab === activeTab` guard); 1 Low — GCash and Maya render the *same* plain
+  "Phone number" field, so clearing between them wasn't actually required by the bug just fixed,
+  and cost a retype for the common case of one number registered on both wallets (asked the user:
+  keep the value between GCash↔Maya, only reset when the field's *meaning* changes); 1 Low (plausible)
+  — tab buttons had no `disabled` while a Save was in flight, so switching tabs mid-save discarded the
+  value being saved and, on failure, surfaced the error under the wrong tab. Best-practice: the new
+  `PaymentTab` type and the tab-render loop's literal array were two unlinked copies of the same 4
+  tabs; `seedFieldsForTab`'s `tab === "QR"` check was fully redundant (`payment_method_type` can
+  never be `"QR"`, so the next clause already covers it).
+- **Second fix unifies all four into one mechanism:** a `fieldGroup(tab)` helper groups GCash/Maya
+  as `"phone"` (one shared meaning) versus Bank's `"bank"` and QR's `"qr"`; a tab switch only
+  reseeds when the group actually changes, which — as a side effect of the same check — also
+  covers re-tapping the active tab (a tab's group never differs from itself) without a separate
+  guard. Tab buttons gained `disabled={savingPaymentMethod}`, matching the Save button's own guard.
+  `PAYMENT_TABS` is now the one canonical array (`PaymentTab` derives from it via
+  `(typeof PAYMENT_TABS)[number]`), and the redundant `"QR"` check was dropped.
+- **Verified after both rounds:** `npx tsc --noEmit` clean, `npx vitest run lib` 28/28, `npm run
+  lint` 0 errors (1 pre-existing warning outside the diff).
 
 ### Serverless migration (complete — 2026-07-26)
 

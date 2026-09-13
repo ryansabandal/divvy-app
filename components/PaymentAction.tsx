@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { parseBankDetails } from "@/lib/paymentDetails";
+import { parseBankDetails, PAYMENT_METHOD_LABELS } from "@/lib/paymentDetails";
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard";
 import type { Participant } from "@/lib/types";
 
@@ -61,7 +61,7 @@ export function PaymentAction({
       displayText = accountNumber;
       copyText = accountNumber;
     } else {
-      methodLabel = creditor.payment_method_type === "GCASH" ? "GCash" : "Maya";
+      methodLabel = PAYMENT_METHOD_LABELS[creditor.payment_method_type];
       displayText = creditor.payment_details;
       copyText = creditor.payment_details;
     }

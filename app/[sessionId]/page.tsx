@@ -23,15 +23,14 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { saveRecentSession } from "@/lib/recentSessions";
 import { deriveDefaultPayer, deriveSessionPayer } from "@/lib/sessionPayer";
-import { parseBankDetails, formatBankDetails } from "@/lib/paymentDetails";
-import { compressImage } from "@/lib/imageCompress";
+import { PAYMENT_METHOD_LABELS } from "@/lib/paymentDetails";
 import { fetcher } from "@/lib/fetcher";
 import { RECONCILED_EPSILON } from "@/lib/settle";
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard";
 import { SessionSummary } from "@/components/SessionSummary";
 import { SessionPayerNote } from "@/components/SessionPayerNote";
 import { ExpenseRow } from "@/components/ExpenseRow";
-import { QrFileInput } from "@/components/QrFileInput";
+import { PaymentMethodEditor } from "./_components/PaymentMethodEditor";
 import type { Participant, Expense, Session } from "@/lib/types";
 
 // One draggable expense card. Pulled out as its own component (rather than inlined in a .map())
@@ -173,20 +172,9 @@ export default function SessionPage() {
   // Same, for the "copy session link" button (this session's own edit URL, so it can be reopened later)
   const { copied: copiedSessionLink, copy: copySessionLink } = useCopyToClipboard();
 
-  // Payment-method form state: which participant's inline form is open, and its fields.
-  // "QR" is a fourth tab alongside the three real PaymentMethodType values — a UI-only concept,
-  // not a value that's ever sent to the backend. Selecting it shows only the QR upload UI (which
-  // persists on its own, no Save needed); the three real types show the number/account form.
+  // Which participant's payment-method form is open — its fields live in PaymentMethodEditor
+  // itself, mounted fresh per participant, so there's only this one flag to track here.
   const [expandedParticipantId, setExpandedParticipantId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"GCASH" | "MAYA" | "BANK_TRANSFER" | "QR">("GCASH");
-  const [paymentDetails, setPaymentDetails] = useState(""); // phone number for GCash/Maya; account number for bank transfer
-  const [bankName, setBankName] = useState(""); // bank transfer only — stored combined as "BankName - AccountNumber"
-  const [savingPaymentMethod, setSavingPaymentMethod] = useState(false);
-  const [paymentMethodError, setPaymentMethodError] = useState<string | null>(null);
-  // Only one participant's form is ever expanded at once, so one flag covers all of them.
-  // Distinguishes upload from remove so the Replace button doesn't say "Uploading…" while a
-  // remove is actually in flight (and vice versa).
-  const [qrAction, setQrAction] = useState<"uploading" | "removing" | null>(null);
 
   if (error) {
     return <main className="flex-1 px-4 py-10 text-center text-red-600">{error.message}</main>;
@@ -226,120 +214,11 @@ export default function SessionPage() {
     });
   }
 
-  // Expand one participant's payment-method form, seeded with whatever they already have saved
-  // (or collapse it if it's already open — tapping the same row again closes it)
+  // Expand one participant's payment-method form, or collapse it if it's already open —
+  // tapping the same row again closes it. PaymentMethodEditor seeds its own fields from the
+  // participant prop, so there's nothing else to do here.
   function toggleExpandParticipant(p: Participant) {
-    if (expandedParticipantId === p.id) {
-      setExpandedParticipantId(null);
-      return;
-    }
-    setExpandedParticipantId(p.id);
-    // A participant with only a QR code (no phone/bank method) has payment_method_type === null —
-    // without this fallback the form silently opened on GCash with an empty field, even though the
-    // collapsed row correctly showed "QR code ✓"
-    setActiveTab(p.payment_method_type || (p.qr_code_url ? "QR" : "GCASH"));
-    setPaymentMethodError(null);
-
-    // Bank transfer is stored as "Bank Name - Account Number" — split into the two separate fields
-    if (p.payment_method_type === "BANK_TRANSFER" && p.payment_details) {
-      const { bankName, accountNumber } = parseBankDetails(p.payment_details);
-      setBankName(bankName);
-      setPaymentDetails(accountNumber);
-    } else {
-      setBankName("");
-      setPaymentDetails(p.payment_details ?? "");
-    }
-  }
-
-  // Save one participant's payment method, then collapse the form and refetch the session.
-  // Only ever called from a tab where a Save button is rendered — QR's tab has none, since it
-  // persists on its own via handleQrUpload/handleQrRemove below.
-  async function handleSavePaymentMethod(participantId: string) {
-    setPaymentMethodError(null);
-
-    // Bank transfer needs two fields; GCash/Maya just need the phone number
-    let details: string;
-    if (activeTab === "BANK_TRANSFER") {
-      if (bankName.trim() === "") { setPaymentMethodError("Enter the bank name"); return; }
-      if (paymentDetails.trim() === "") { setPaymentMethodError("Enter the account number"); return; }
-      // Combine into the stored format — only the account number is copied on the settle screen
-      details = formatBankDetails(bankName.trim(), paymentDetails.trim());
-    } else {
-      if (paymentDetails.trim() === "") { setPaymentMethodError("Enter your phone number"); return; }
-      details = paymentDetails.trim();
-    }
-
-    setSavingPaymentMethod(true);
-    const res = await fetch(`/api/sessions/${sessionId}/participants/${participantId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ payment_method_type: activeTab, payment_details: details }),
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setPaymentMethodError(body.error ?? "Failed to save payment method");
-      setSavingPaymentMethod(false);
-      return;
-    }
-
-    setExpandedParticipantId(null);
-    await mutate();
-    setSavingPaymentMethod(false);
-  }
-
-  // Compress the picked file, mint a signed upload URL, PUT the bytes straight to Storage (plain
-  // fetch — confirmed against the real bucket that no credentials are needed for this endpoint),
-  // then persist the resulting path. Three requests, but only the middle one carries the image.
-  async function handleQrUpload(participantId: string, file: File) {
-    setPaymentMethodError(null);
-    setQrAction("uploading");
-    try {
-      const compressed = await compressImage(file);
-
-      const mintRes = await fetch(`/api/sessions/${sessionId}/participants/${participantId}/qr`, { method: "POST" });
-      if (!mintRes.ok) {
-        const body = await mintRes.json().catch(() => ({}));
-        throw new Error(body.error ?? "Failed to start QR upload");
-      }
-      const { path, signed_url } = await mintRes.json();
-
-      const uploadRes = await fetch(signed_url, {
-        method: "PUT",
-        headers: { "content-type": "image/jpeg" },
-        body: compressed,
-      });
-      if (!uploadRes.ok) throw new Error("Failed to upload QR image");
-
-      const persistRes = await fetch(`/api/sessions/${sessionId}/participants/${participantId}/qr`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path }),
-      });
-      if (!persistRes.ok) {
-        const body = await persistRes.json().catch(() => ({}));
-        throw new Error(body.error ?? "Failed to save QR code");
-      }
-
-      await mutate();
-    } catch (err) {
-      setPaymentMethodError(err instanceof Error ? err.message : "Failed to upload QR code");
-    } finally {
-      setQrAction(null);
-    }
-  }
-
-  // Clear a participant's QR code and delete the underlying Storage object
-  async function handleQrRemove(participantId: string) {
-    setPaymentMethodError(null);
-    setQrAction("removing");
-    const res = await fetch(`/api/sessions/${sessionId}/participants/${participantId}/qr`, { method: "DELETE" });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setPaymentMethodError(body.error ?? "Failed to remove QR code");
-    }
-    await mutate();
-    setQrAction(null);
+    setExpandedParticipantId(expandedParticipantId === p.id ? null : p.id);
   }
 
   // Confirm then DELETE the expense; refetch so the list reflects the removal immediately
@@ -643,13 +522,7 @@ export default function SessionPage() {
                   <span className="font-medium text-navy">{p.name}</span>
                   <span className={`text-xs ${p.payment_method_type || p.qr_code_url ? "text-teal font-medium" : "text-navy/40"}`}>
                     {p.payment_method_type
-                      ? `${
-                          p.payment_method_type === "GCASH"
-                            ? "GCash"
-                            : p.payment_method_type === "MAYA"
-                              ? "Maya"
-                              : "Bank"
-                        } ✓`
+                      ? `${PAYMENT_METHOD_LABELS[p.payment_method_type]} ✓`
                       : p.qr_code_url
                         ? "QR code ✓"
                         : "Add payment method"}
@@ -657,106 +530,13 @@ export default function SessionPage() {
                 </button>
 
                 {expandedParticipantId === p.id && (
-                  // Inline form: pick a tab, fill it in. GCash/Maya/Bank save via PATCH with a
-                  // Save button; QR is a fourth tab that uploads/persists on its own, no Save
-                  // needed — the two never mix, so there's no "which method does this QR belong
-                  // to" ambiguity.
-                  <div className="panel-reveal mt-2 flex flex-col gap-2 rounded-2xl border border-navy/10 bg-white p-4 shadow-sm">
-                    <div className="flex flex-wrap gap-2">
-                      {(["GCASH", "MAYA", "BANK_TRANSFER", "QR"] as const).map((tab) => (
-                        <button
-                          key={tab}
-                          type="button"
-                          onClick={() => setActiveTab(tab)}
-                          className={`btn-toggle ${activeTab === tab ? "btn-toggle-active" : "btn-toggle-inactive"}`}
-                        >
-                          {tab === "GCASH" ? "GCash" : tab === "MAYA" ? "Maya" : tab === "BANK_TRANSFER" ? "Bank" : "QR"}
-                        </button>
-                      ))}
-                    </div>
-
-                    {activeTab === "QR" ? (
-                      p.qr_code_url ? (
-                        <div className="flex items-center gap-3">
-                          {/* Plain <img> (not next/image) so long-press / right-click "Save
-                              image" works natively — that's the whole point of a settle-screen
-                              QR: the payer needs to walk away with the image, not just view it */}
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={p.qr_code_url}
-                            alt={`${p.name}'s QR code`}
-                            className="h-16 w-16 rounded-lg border border-navy/10 object-contain"
-                          />
-                          <div className="flex gap-2">
-                            <QrFileInput
-                              label="Replace"
-                              uploading={qrAction === "uploading"}
-                              disabled={qrAction !== null}
-                              className="btn-compact cursor-pointer"
-                              onFile={(file) => handleQrUpload(p.id, file)}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleQrRemove(p.id)}
-                              disabled={qrAction !== null}
-                              className="btn-compact disabled:opacity-50"
-                            >
-                              {qrAction === "removing" ? "Removing…" : "Remove"}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <QrFileInput
-                          label="Add QR code"
-                          uploading={qrAction === "uploading"}
-                          disabled={qrAction !== null}
-                          className="btn-compact w-fit cursor-pointer"
-                          onFile={(file) => handleQrUpload(p.id, file)}
-                        />
-                      )
-                    ) : activeTab === "BANK_TRANSFER" ? (
-                      // Two separate fields — combined on save so only the account number is copied later
-                      <>
-                        <input
-                          type="text"
-                          value={bankName}
-                          onChange={(e) => setBankName(e.target.value)}
-                          placeholder="Bank name (e.g. BPI)"
-                          className="input"
-                        />
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={paymentDetails}
-                          onChange={(e) => setPaymentDetails(e.target.value)}
-                          placeholder="Account number"
-                          className="input"
-                        />
-                      </>
-                    ) : (
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={paymentDetails}
-                        onChange={(e) => setPaymentDetails(e.target.value)}
-                        placeholder="Phone number"
-                        className="input"
-                      />
-                    )}
-
-                    {paymentMethodError && <p className="text-sm text-red-500">{paymentMethodError}</p>}
-
-                    {activeTab !== "QR" && (
-                      <button
-                        type="button"
-                        onClick={() => handleSavePaymentMethod(p.id)}
-                        disabled={savingPaymentMethod}
-                        className="btn-compact self-end disabled:opacity-50"
-                      >
-                        {savingPaymentMethod ? "Saving…" : "Save"}
-                      </button>
-                    )}
-                  </div>
+                  <PaymentMethodEditor
+                    key={p.id}
+                    sessionId={sessionId}
+                    participant={p}
+                    mutate={mutate}
+                    onClose={() => setExpandedParticipantId(null)}
+                  />
                 )}
               </li>
             ))}
