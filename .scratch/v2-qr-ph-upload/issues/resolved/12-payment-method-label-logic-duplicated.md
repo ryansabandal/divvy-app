@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: resolved
 Severity: Low
 Category: Best-Practice
 
@@ -18,3 +18,10 @@ Found by: best-practice-reviewer, Phase G.2 review (2026-08-16).
 the `PaymentMethodEditor` that h18's decomposition extracts — see `.scratch/BACKLOG.md` cluster E —
 so it rides with that cluster's restoration rather than being fixed standalone; see h18's comment
 for the full reasoning.
+
+**2026-09-13 — resolved.** `PAYMENT_METHOD_LABELS: Record<PaymentMethodType, string>` added to
+`lib/paymentDetails.ts` and applied at all three sites named above (`page.tsx`'s collapsed-row
+status text and tab-button labels moved into the new `PaymentMethodEditor.tsx`;
+`PaymentAction.tsx:64`'s GCash/Maya line). `PaymentAction.tsx`'s `BANK_TRANSFER` arm deliberately
+keeps its own `bankName || "Bank"` fallback, untouched by the map. 3-lens reviewed as part of
+Cluster E Slice 2 — see CHANGELOG.md's dated entry.

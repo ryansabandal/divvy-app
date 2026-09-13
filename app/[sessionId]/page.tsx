@@ -4,111 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
-import {
-  DndContext,
-  closestCenter,
-  PointerSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  sortableKeyboardCoordinates,
-  arrayMove,
-  useSortable,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { saveRecentSession } from "@/lib/recentSessions";
 import { deriveDefaultPayer, deriveSessionPayer } from "@/lib/sessionPayer";
 import { PAYMENT_METHOD_LABELS } from "@/lib/paymentDetails";
 import { fetcher } from "@/lib/fetcher";
-import { RECONCILED_EPSILON } from "@/lib/settle";
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard";
 import { SessionSummary } from "@/components/SessionSummary";
-import { SessionPayerNote } from "@/components/SessionPayerNote";
-import { ExpenseRow } from "@/components/ExpenseRow";
 import { PaymentMethodEditor } from "./_components/PaymentMethodEditor";
+import { ExpenseList } from "./_components/ExpenseList";
+import { ExpenseForm } from "./_components/ExpenseForm";
 import type { Participant, Expense, Session } from "@/lib/types";
-
-// One draggable expense card. Pulled out as its own component (rather than inlined in a .map())
-// because useSortable must be called once per item, and hooks can't be called inside a callback.
-function SortableExpenseCard({
-  expense,
-  onEdit,
-  onDelete,
-  isDeleting,
-  hidePayerName,
-}: {
-  expense: Expense;
-  onEdit: (expense: Expense) => void;
-  onDelete: (expenseId: string) => void;
-  isDeleting: boolean;
-  // Forwarded straight through to ExpenseRow, which owns the "Paid by" guard this drives.
-  hidePayerName: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
-    id: expense.id,
-  });
-  // Lift the card while dragging; merged inline because dnd-kit sets `transition` on this node
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition: [transition, "box-shadow 160ms var(--ease-out)"].filter(Boolean).join(", "),
-    boxShadow: isDragging ? "var(--shadow-md)" : undefined,
-  };
-
-  return (
-    <li ref={setNodeRef} style={style} className={`card-navy p-4 ${isDragging ? "opacity-50" : ""}`}>
-      {/* enter-rise lives here, not on the <li> — dnd-kit already drives that element's own
-          transform/transition, and a second transform on the same node would fight it */}
-      <div className="enter-rise">
-        <ExpenseRow
-          expense={expense}
-          hidePayerName={hidePayerName}
-          leading={
-            // Drag handle: only this icon starts a drag, so tapping the card or the edit/delete
-            // buttons next to it is never mistaken for the start of a reorder
-            <button
-              type="button"
-              ref={setActivatorNodeRef}
-              {...attributes}
-              {...listeners}
-              aria-label="Reorder expense"
-              className="cursor-grab touch-none px-1 text-white/30 active:cursor-grabbing"
-            >
-              ⠿
-            </button>
-          }
-          actions={
-            <>
-              {/* Edit button: loads this expense into the form below, pre-filled */}
-              <button
-                type="button"
-                onClick={() => onEdit(expense)}
-                aria-label="Edit expense"
-                className="icon-btn px-1 text-white/40 hover:text-teal"
-              >
-                ✎
-              </button>
-              {/* Delete button: small tap target, grays out while the request is in flight */}
-              <button
-                type="button"
-                onClick={() => onDelete(expense.id)}
-                disabled={isDeleting}
-                aria-label="Delete expense"
-                className="icon-btn px-1 text-white/40 hover:text-red-400 disabled:opacity-40"
-              >
-                {isDeleting ? "…" : "✕"}
-              </button>
-            </>
-          }
-        />
-      </div>
-    </li>
-  );
-}
 
 // Session view: show the bill, who's in it, every expense, and a form to add more
 export default function SessionPage() {
@@ -128,45 +33,24 @@ export default function SessionPage() {
     if (session) saveRecentSession(session.id, session.name);
   }, [session?.id, session?.name]);
 
-  // Add-expense form state
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
   // Who fronted the bill for this session, picked once near the participant list rather than
   // per expense (the common case is a single payer for the whole night). null/"" means "not
   // picked yet by the user" — the render-time default below fills it in without a setState effect.
   const [sessionPayer, setSessionPayer] = useState("");
-  // Forces the session-payer picker open after "Change"; cleared on the next successful expense
-  // submit (see handleSubmitExpense), so sessionPayerLocked below goes back to being purely
-  // derived from recorded data — same reason it survives a page reload with no persistence of its own.
+  // Forces the session-payer picker open after "Change"; cleared once handleExpenseSubmitted's
+  // mutate() resolves, so sessionPayerLocked below goes back to being purely derived from recorded
+  // data — same reason it survives a page reload with no persistence of its own.
   const [payerPickerForcedOpen, setPayerPickerForcedOpen] = useState(false);
-  // Per-expense override: null tracks the live session payer (correct in ADD mode). In EDIT mode
-  // it's always pinned to the expense's actual payer instead (see handleStartEdit) — leaving it
-  // null there would let the submitted paid_by drift if the session payer changes while the form
-  // stays open. Kept separate from sessionPayer so editing one expense can't rewrite the default
-  // for every future expense.
-  const [payerOverride, setPayerOverride] = useState<string | null>(null);
-  const [payerOverrideOpen, setPayerOverrideOpen] = useState(false);
-  const [splitWith, setSplitWith] = useState<string[] | null>(null);
-  const [splitType, setSplitType] = useState<"EVEN" | "CUSTOM" | "QUANTITY">("EVEN");
-  const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
-  const [quantity, setQuantity] = useState("");
-  const [customUnits, setCustomUnits] = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  // Which expense is currently being deleted (shows a spinner in that row), and any delete error
-  const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  // Non-null while the form below is editing an existing expense rather than adding a new one
-  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  // Non-null while ExpenseForm below is editing an existing expense rather than adding a new one;
+  // ExpenseForm is remounted (see the key on it below) whenever either of these changes, so it
+  // always seeds its own fields fresh rather than needing a sync effect.
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  // Bumped on every Edit click, including re-clicking the expense already being edited — folded
+  // into ExpenseForm's key below so the form always re-seeds from the latest data, not just when
+  // the target expense's id changes.
+  const [editClickCount, setEditClickCount] = useState(0);
   // So tapping "Edit" can scroll the (always-rendered) form into view on mobile
   const addExpenseSectionRef = useRef<HTMLElement>(null);
-  // Set if a drag-reorder's PATCH fails after the optimistic UI update already applied
-  const [reorderError, setReorderError] = useState<string | null>(null);
-  // Pointer (mouse/touch, via the drag handle) + keyboard (arrow keys, for accessibility)
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
   // One copy-to-clipboard flow per button, so each can independently show "Copied!"
   const { copied: copiedShareLink, copy: copyShareLink } = useCopyToClipboard();
   // Same, for the "copy session link" button (this session's own edit URL, so it can be reopened later)
@@ -190,10 +74,6 @@ export default function SessionPage() {
   // (see lib/sessionPayer.ts — NOT unanimity, which would collapse to participant #1 the moment a
   // single expense is overridden), else the first participant when there are no expenses yet.
   const effectiveSessionPayer = sessionPayer || deriveDefaultPayer(session.expenses) || allParticipantIds[0] || "";
-  // What actually gets submitted for the expense currently in the form: a per-expense override
-  // if one is set, otherwise the session-wide payer.
-  const effectivePaidBy = payerOverride || effectiveSessionPayer;
-  const effectiveSplitWith = splitWith ?? allParticipantIds;
   // Non-null only when every expense shares one payer — drives whether expense rows repeat
   // "Paid by X" on each card or state it once under the section heading instead.
   const derivedSessionPayer = deriveSessionPayer(session.expenses);
@@ -206,14 +86,6 @@ export default function SessionPage() {
     derivedSessionPayer !== null &&
     (sessionPayer === "" || sessionPayer === derivedSessionPayer.id);
 
-  // Toggle one participant in or out of the even split (seeding from the default when untouched)
-  function toggleSplitWith(id: string) {
-    setSplitWith((prev) => {
-      const current = prev ?? allParticipantIds;
-      return current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
-    });
-  }
-
   // Expand one participant's payment-method form, or collapse it if it's already open —
   // tapping the same row again closes it. PaymentMethodEditor seeds its own fields from the
   // participant prop, so there's nothing else to do here.
@@ -221,244 +93,24 @@ export default function SessionPage() {
     setExpandedParticipantId(expandedParticipantId === p.id ? null : p.id);
   }
 
-  // Confirm then DELETE the expense; refetch so the list reflects the removal immediately
-  async function handleDeleteExpense(expenseId: string) {
-    if (!window.confirm("Remove this expense?")) return;
-    setDeleteError(null);
-    setDeletingExpenseId(expenseId);
-    const res = await fetch(`/api/sessions/${sessionId}/expenses/${expenseId}`, { method: "DELETE" });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setDeleteError(body.error ?? "Failed to delete expense");
-      setDeletingExpenseId(null);
-      return;
-    }
-    // Otherwise the form would stay bound to a row that no longer exists
-    if (expenseId === editingExpenseId) resetForm();
-    await mutate();
-    setDeletingExpenseId(null);
-  }
-
-  // Reorders expenses on drag-end: shows the new order immediately (optimistic), PATCHes it to
-  // the backend, then reconciles — or reverts, via the plain mutate() below, if that PATCH fails
-  async function handleDragEnd(event: DragEndEvent) {
-    // TS doesn't carry the outer `if (!session) return` guard's narrowing into this nested
-    // function, since it could in principle run later — so it needs its own local guard
-    if (!session) return;
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = session.expenses.findIndex((exp) => exp.id === active.id);
-    const newIndex = session.expenses.findIndex((exp) => exp.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-
-    const reordered = arrayMove(session.expenses, oldIndex, newIndex);
-    setReorderError(null);
-    await mutate({ ...session, expenses: reordered }, { revalidate: false });
-
-    const res = await fetch(`/api/sessions/${sessionId}/expenses`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expense_ids: reordered.map((exp) => exp.id) }),
-    });
-
-    if (!res.ok) {
-      setReorderError("Failed to save the new order");
-    }
-    await mutate(); // reconciles with the server, or reverts the optimistic update on failure
-  }
-
-  // Shared by "cancel edit" and "after a successful add/save" — back to blank, add-mode defaults.
-  // Clears the per-expense payer override, NOT the session-wide payer — otherwise one overridden
-  // expense would poison every expense added afterward in this form.
-  function resetForm() {
-    setEditingExpenseId(null);
-    setFormError(null);
-    setDescription("");
-    setAmount("");
-    setPayerOverride(null);
-    setPayerOverrideOpen(false);
-    setSplitWith(null);
-    setSplitType("EVEN");
-    setCustomAmounts({});
-    setQuantity("");
-    setCustomUnits({});
-  }
-
   // Populate the (always-rendered) form from an existing expense, then scroll it into view —
-  // otherwise a tap on "Edit" up in the list leaves the form off-screen below the fold
+  // otherwise a tap on "Edit" up in the list leaves the form off-screen below the fold. Bumping
+  // editClickCount forces a fresh re-seed even when re-clicking Edit on the expense already open,
+  // which a same-id key change alone would miss.
   function handleStartEdit(expense: Expense) {
-    setEditingExpenseId(expense.id);
-    setFormError(null);
-    setDescription(expense.description);
-    setAmount(String(expense.amount));
-    // Always PIN the override to this expense's actual payer for the duration of the edit —
-    // never null, even when it currently matches the session-wide payer. Leaving it null would
-    // make effectivePaidBy keep tracking effectiveSessionPayer live (a derived value that shifts
-    // with deriveDefaultPayer's most-frequent/most-recent heuristic), so deleting a DIFFERENT
-    // expense, drag-reordering the list, or touching the session-wide picker while this edit is
-    // still open could silently re-target this expense's paid_by on Save — corrupting who owes
-    // what with no visible cause. Only the disclosure's open/closed state depends on the
-    // session-payer comparison; the pinned value itself never does.
-    setPayerOverride(expense.payer.id);
-    setPayerOverrideOpen(expense.payer.id !== effectiveSessionPayer);
-    setSplitType(expense.split_type);
-    setSplitWith(expense.split_type === "EVEN" ? expense.splits.map((s) => s.participant_id) : null);
-    setCustomAmounts(
-      expense.split_type === "CUSTOM"
-        ? Object.fromEntries(expense.splits.map((s) => [s.participant_id, String(s.amount_owed)]))
-        : {},
-    );
-    setQuantity(expense.split_type === "QUANTITY" ? String(expense.quantity ?? "") : "");
-    setCustomUnits(
-      expense.split_type === "QUANTITY"
-        ? Object.fromEntries(expense.splits.map((s) => [s.participant_id, String(s.units ?? "")]))
-        : {},
-    );
+    setEditingExpense(expense);
+    setEditClickCount((n) => n + 1);
     addExpenseSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  // The expense total, how much is already allocated, and what's still left to split
-  const expenseAmount = Number(amount) || 0;
-  const customTotal = allParticipantIds.reduce((sum, id) => sum + (Number(customAmounts[id]) || 0), 0);
-  const remaining = expenseAmount - customTotal;
-
-  // For a CUSTOM split: update one person's amount, but never let the running total exceed the expense
-  function setCustomAmount(id: string, value: string) {
-    setCustomAmounts((prev) => {
-      if (value === "") return { ...prev, [id]: "" };
-      const num = Number(value);
-      if (!Number.isFinite(num) || num < 0) return prev; // ignore non-numeric / negative input
-      // how much everyone *else* already has, so this person can take at most the rest
-      const otherSum = allParticipantIds
-        .filter((pid) => pid !== id)
-        .reduce((s, pid) => s + (Number(prev[pid]) || 0), 0);
-      const cap = Math.max(0, expenseAmount - otherSum);
-      if (num > cap) return { ...prev, [id]: String(cap) }; // clamp to the remaining balance
-      return { ...prev, [id]: value }; // otherwise keep exactly what they typed (preserves "560." etc.)
-    });
-  }
-
-  // QUANTITY split: derive unit price + remaining units, and clamp per-person units to the quantity
-  const quantityNum = Number(quantity) || 0;
-  const unitsTotal = allParticipantIds.reduce((sum, id) => sum + (Number(customUnits[id]) || 0), 0);
-  const remainingUnits = quantityNum - unitsTotal;
-  const unitPrice = quantityNum > 0 ? expenseAmount / quantityNum : 0;
-
-  function setCustomUnit(id: string, value: string) {
-    setCustomUnits((prev) => {
-      if (value === "") return { ...prev, [id]: "" };
-      const num = Number(value);
-      if (!Number.isInteger(num) || num < 0) return prev; // whole units only
-      const otherSum = allParticipantIds
-        .filter((pid) => pid !== id)
-        .reduce((s, pid) => s + (Number(prev[pid]) || 0), 0);
-      const cap = Math.max(0, quantityNum - otherSum);
-      if (num > cap) return { ...prev, [id]: String(cap) }; // clamp so units can't exceed quantity
-      return { ...prev, [id]: value };
-    });
-  }
-
-  // Validate the form, then POST a new expense or PATCH the one being edited; mutate() after
-  // so SWR refetches and the list reflects it
-  async function handleSubmitExpense(e: React.SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setFormError(null);
-
-    const amountNum = Number(amount);
-    if (description.trim() === "") {
-      setFormError("Add a description");
-      return;
-    }
-    if (!Number.isFinite(amountNum) || amountNum <= 0) {
-      setFormError("Amount must be greater than 0");
-      return;
-    }
-    if (effectivePaidBy === "") {
-      setFormError("Pick who paid");
-      return;
-    }
-
-    // Build the split portion of the payload differently for EVEN vs CUSTOM
-    let splitPayload:
-      | { split_type: "EVEN"; participant_ids: string[] }
-      | { split_type: "CUSTOM"; splits: { participant_id: string; amount_owed: number }[] }
-      | { split_type: "QUANTITY"; quantity: number; splits: { participant_id: string; units: number }[] };
-
-    if (splitType === "EVEN") {
-      if (effectiveSplitWith.length === 0) {
-        setFormError("Pick at least one person to split with");
-        return;
-      }
-      splitPayload = { split_type: "EVEN", participant_ids: effectiveSplitWith };
-    } else if (splitType === "CUSTOM") {
-      // Only include people with a positive amount; the backend requires each split > 0
-      const splits = allParticipantIds
-        .map((id) => ({ participant_id: id, amount_owed: Number(customAmounts[id]) || 0 }))
-        .filter((s) => s.amount_owed > 0);
-      if (splits.length === 0) {
-        setFormError("Enter an amount for at least one person");
-        return;
-      }
-      // Mirror the backend's rule: the custom amounts must sum to the expense total, using the
-      // server's own tolerance so the two can't drift
-      const sum = splits.reduce((s, x) => s + x.amount_owed, 0);
-      if (Math.abs(sum - amountNum) > RECONCILED_EPSILON) {
-        setFormError(`₱${(amountNum - sum).toFixed(2)} still needs to be split`);
-        return;
-      }
-      splitPayload = { split_type: "CUSTOM", splits };
-    } else {
-      // QUANTITY: each person's whole-number units must add up to the total quantity
-      if (!Number.isInteger(quantityNum) || quantityNum <= 0) {
-        setFormError("Enter a whole-number quantity");
-        return;
-      }
-      const splits = allParticipantIds
-        .map((id) => ({ participant_id: id, units: Number(customUnits[id]) || 0 }))
-        .filter((s) => s.units > 0);
-      if (splits.length === 0) {
-        setFormError("Enter units for at least one person");
-        return;
-      }
-      const totalUnits = splits.reduce((s, x) => s + x.units, 0);
-      if (totalUnits !== quantityNum) {
-        setFormError(`${quantityNum - totalUnits} unit(s) still need assigning`);
-        return;
-      }
-      splitPayload = { split_type: "QUANTITY", quantity: quantityNum, splits };
-    }
-
-    setSubmitting(true);
-    // Editing an existing expense PATCHes it in place; otherwise POST creates a new one
-    const url = editingExpenseId
-      ? `/api/sessions/${sessionId}/expenses/${editingExpenseId}`
-      : `/api/sessions/${sessionId}/expenses`;
-    const res = await fetch(url, {
-      method: editingExpenseId ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        description: description.trim(),
-        amount: amountNum,
-        paid_by: effectivePaidBy,
-        ...splitPayload,
-      }),
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setFormError(body.error ?? (editingExpenseId ? "Failed to save changes" : "Failed to add expense"));
-      setSubmitting(false);
-      return;
-    }
-
-    // Back to blank, add-mode defaults, then tell SWR to refetch so the change appears
-    resetForm();
+  // Fires after ExpenseForm submits successfully. Refetches first, then clears editingExpense (so
+  // ExpenseForm only remounts blank once fresh data is in) and the picker-forced-open flag — both
+  // deliberately after mutate() resolves, so nothing flickers or briefly becomes interactive
+  // against stale pre-submit data.
+  async function handleExpenseSubmitted() {
     await mutate();
-    // Cleared after mutate() resolves (not before) so the picker/tile don't flicker for one
-    // round trip against stale pre-submit data.
+    setEditingExpense(null);
     setPayerPickerForcedOpen(false);
-    setSubmitting(false);
   }
 
   return (
@@ -543,221 +195,39 @@ export default function SessionPage() {
           </ul>
         </section>
 
-        {/* Expenses */}
-        <section>
-          <h2 className="section-label">Expenses</h2>
-          {/* Named once here instead of on every card below — only true once every expense
-              shares one payer; a mixed session falls back to naming the payer per row */}
-          <SessionPayerNote payer={derivedSessionPayer} className="-mt-2 mb-3 text-sm text-navy/40" />
-          {deleteError && <p className="mb-2 text-sm text-red-500">{deleteError}</p>}
-          {reorderError && <p className="mb-2 text-sm text-red-500">{reorderError}</p>}
-          {session.expenses.length === 0 ? (
-            <p className="text-sm text-navy/40">No expenses yet.</p>
-          ) : (
-            <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-              <SortableContext items={session.expenses.map((e) => e.id)} strategy={verticalListSortingStrategy}>
-                <ul className="flex flex-col gap-3">
-                  {session.expenses.map((e) => (
-                    <SortableExpenseCard
-                      key={e.id}
-                      expense={e}
-                      onEdit={handleStartEdit}
-                      onDelete={handleDeleteExpense}
-                      isDeleting={deletingExpenseId === e.id}
-                      hidePayerName={!!derivedSessionPayer}
-                    />
-                  ))}
-                </ul>
-              </SortableContext>
-            </DndContext>
-          )}
-        </section>
+        <ExpenseList
+          sessionId={sessionId}
+          session={session}
+          mutate={mutate}
+          derivedSessionPayer={derivedSessionPayer}
+          onEdit={handleStartEdit}
+          // Otherwise the form would stay bound to a row that no longer exists; leaves it alone
+          // when the deleted expense isn't the one currently open
+          onDeleted={(id) => setEditingExpense((cur) => (cur?.id === id ? null : cur))}
+        />
 
-        {/* Add or edit an expense — the same form serves both; editingExpenseId picks the mode */}
+        {/* Add or edit an expense — the same form serves both; editingExpense picks the mode */}
         <section ref={addExpenseSectionRef} className="mt-8 border-t border-navy/10 pt-6">
           <div className="flex items-center justify-between">
-            <h2 className="section-label">{editingExpenseId ? "Edit expense" : "Add an expense"}</h2>
-            {editingExpenseId && (
-              <button type="button" onClick={resetForm} className="text-sm font-medium text-navy/50">
+            <h2 className="section-label">{editingExpense ? "Edit expense" : "Add an expense"}</h2>
+            {editingExpense && (
+              <button
+                type="button"
+                onClick={() => setEditingExpense(null)}
+                className="text-sm font-medium text-navy/50"
+              >
                 Cancel
               </button>
             )}
           </div>
-          <form onSubmit={handleSubmitExpense} className="flex flex-col gap-3">
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What was it? (e.g. Chili Cheese Fries)"
-              className="input"
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="Amount (₱)"
-              className="input"
-            />
-
-            {/* Collapsed by default — the session-wide payer picker above already covers the
-                common case, so this only expands when this one expense needs a different payer */}
-            {payerOverrideOpen ? (
-              /* Restates the form's own flex layout — a bare wrapper would collapse the label
-                 row and select into one flex child and drop the gap between them */
-              <div className="panel-reveal flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="payer-override" className="text-sm font-medium text-navy">
-                    Paid by
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // EDIT mode pins to the concrete id (see handleStartEdit) rather than null,
-                      // which would resume tracking the live session payer until Save.
-                      setPayerOverride(editingExpenseId ? effectiveSessionPayer : null);
-                      setPayerOverrideOpen(false);
-                    }}
-                    className="text-sm font-medium text-navy/50"
-                  >
-                    Use {session.participants.find((p) => p.id === effectiveSessionPayer)?.name ?? "session payer"}
-                  </button>
-                </div>
-                <select
-                  id="payer-override"
-                  value={effectivePaidBy}
-                  onChange={(e) => setPayerOverride(e.target.value)}
-                  className="input"
-                >
-                  {session.participants.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <p className="text-sm text-navy/60">
-                Paid by {session.participants.find((p) => p.id === effectivePaidBy)?.name ?? "—"} ·{" "}
-                <button
-                  type="button"
-                  onClick={() => setPayerOverrideOpen(true)}
-                  className="font-medium text-teal underline"
-                >
-                  Change
-                </button>
-              </p>
-            )}
-
-            {/* Toggle between the three split modes */}
-            <div className="flex gap-2">
-              {(["EVEN", "QUANTITY", "CUSTOM"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setSplitType(mode)}
-                  className={`btn-toggle ${splitType === mode ? "btn-toggle-active" : "btn-toggle-inactive"}`}
-                >
-                  {mode === "EVEN" ? "Evenly" : mode === "QUANTITY" ? "Quantity" : "Amount"}
-                </button>
-              ))}
-            </div>
-
-            {splitType === "EVEN" ? (
-              // Even split: check who shares this expense
-              <div className="flex flex-col gap-1.5">
-                {session.participants.map((p) => (
-                  <label key={p.id} className="flex items-center gap-2 text-base text-navy">
-                    <input
-                      type="checkbox"
-                      checked={effectiveSplitWith.includes(p.id)}
-                      onChange={() => toggleSplitWith(p.id)}
-                      className="accent-teal"
-                    />
-                    {p.name}
-                  </label>
-                ))}
-              </div>
-            ) : splitType === "QUANTITY" ? (
-              // By quantity: enter total quantity, then each person's units; backend computes amounts
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-navy">Total quantity</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  placeholder="e.g. 6"
-                  className="input"
-                />
-                {expenseAmount > 0 && quantityNum > 0 ? (
-                  <p className="text-xs text-navy/50">₱{unitPrice.toFixed(2)} per unit</p>
-                ) : (
-                  <p className="text-xs text-navy/40">Enter the amount and quantity first, then assign units.</p>
-                )}
-                {session.participants.map((p) => (
-                  <label key={p.id} className="flex items-center justify-between gap-2 text-base text-navy">
-                    <span>{p.name}</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={customUnits[p.id] ?? ""}
-                      onChange={(e) => setCustomUnit(p.id, e.target.value)}
-                      placeholder="0"
-                      disabled={expenseAmount <= 0 || quantityNum <= 0}
-                      className="w-20 rounded-lg border border-navy/20 px-2 py-1 text-right text-base focus:outline-none focus:ring-1 focus:ring-teal/40 disabled:bg-beige"
-                    />
-                  </label>
-                ))}
-                <div className="mt-1 flex justify-between text-sm">
-                  <span className="text-navy/50">Units remaining</span>
-                  <span className={quantityNum > 0 && remainingUnits === 0 ? "font-medium text-teal" : "text-navy/50"}>
-                    {remainingUnits}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              // Custom split: enter each person's amount; the remaining balance updates live
-              <div className="flex flex-col gap-2">
-                {expenseAmount <= 0 && (
-                  <p className="text-xs text-navy/40">Enter the amount above first, then split it below.</p>
-                )}
-                {session.participants.map((p) => (
-                  <label key={p.id} className="flex items-center justify-between gap-2 text-base text-navy">
-                    <span>{p.name}</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={customAmounts[p.id] ?? ""}
-                      onChange={(e) => setCustomAmount(p.id, e.target.value)}
-                      placeholder="0.00"
-                      disabled={expenseAmount <= 0}
-                      className="w-24 rounded-lg border border-navy/20 px-2 py-1 text-right text-base focus:outline-none focus:ring-1 focus:ring-teal/40 disabled:bg-beige"
-                    />
-                  </label>
-                ))}
-                <div className="mt-1 flex justify-between text-sm">
-                  <span className="text-navy/50">Remaining to split</span>
-                  {/* Teal when the split is balanced — same threshold as the submit guard */}
-                  <span className={expenseAmount > 0 && Math.abs(remaining) <= RECONCILED_EPSILON ? "font-medium text-teal" : "text-navy/50"}>
-                    ₱{remaining.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {formError && <p className="text-sm text-red-500">{formError}</p>}
-
-            <button type="submit" disabled={submitting} className="btn-primary">
-              {editingExpenseId
-                ? submitting
-                  ? "Saving…"
-                  : "Save changes"
-                : submitting
-                  ? "Adding…"
-                  : "Add expense"}
-            </button>
-          </form>
+          <ExpenseForm
+            key={editingExpense ? `${editingExpense.id}-${editClickCount}` : "new"}
+            sessionId={sessionId}
+            participants={session.participants}
+            effectiveSessionPayer={effectiveSessionPayer}
+            editingExpense={editingExpense}
+            onSubmitted={handleExpenseSubmitted}
+          />
         </section>
 
         {/* Copy this session's own (editable) URL, so it can be pasted somewhere and reopened later */}
