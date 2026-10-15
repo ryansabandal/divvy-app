@@ -275,7 +275,7 @@ export function ExpenseForm({
                 setPayerOverride(editingExpense ? effectiveSessionPayer : null);
                 setPayerOverrideOpen(false);
               }}
-              className="text-sm font-medium text-navy/50"
+              className="text-btn text-sm font-medium text-navy/50"
             >
               Use {participants.find((p) => p.id === effectiveSessionPayer)?.name ?? "session payer"}
             </button>
@@ -299,7 +299,7 @@ export function ExpenseForm({
           <button
             type="button"
             onClick={() => setPayerOverrideOpen(true)}
-            className="font-medium text-teal underline"
+            className="text-btn font-medium text-teal underline"
           >
             Change
           </button>
@@ -329,7 +329,7 @@ export function ExpenseForm({
                 type="checkbox"
                 checked={effectiveSplitWith.includes(p.id)}
                 onChange={() => toggleSplitWith(p.id)}
-                className="accent-teal"
+                className="h-5 w-5 shrink-0 accent-teal"
               />
               {p.name}
             </label>
@@ -348,7 +348,7 @@ export function ExpenseForm({
             className="input"
           />
           {expenseAmount > 0 && quantityNum > 0 ? (
-            <p className="text-xs text-navy/50">₱{unitPrice.toFixed(2)} per unit</p>
+            <p className="text-xs tabular-nums text-navy/50">₱{unitPrice.toFixed(2)} per unit</p>
           ) : (
             <p className="text-xs text-navy/40">Enter the amount and quantity first, then assign units.</p>
           )}
@@ -362,13 +362,13 @@ export function ExpenseForm({
                 onChange={(e) => setCustomUnit(p.id, e.target.value)}
                 placeholder="0"
                 disabled={expenseAmount <= 0 || quantityNum <= 0}
-                className="w-20 rounded-lg border border-navy/20 px-2 py-1 text-right text-base focus:outline-none focus:ring-1 focus:ring-teal/40 disabled:bg-beige"
+                className="input-compact w-20"
               />
             </label>
           ))}
           <div className="mt-1 flex justify-between text-sm">
             <span className="text-navy/50">Units remaining</span>
-            <span className={quantityNum > 0 && remainingUnits === 0 ? "font-medium text-teal" : "text-navy/50"}>
+            <span className={`tabular-nums ${quantityNum > 0 && remainingUnits === 0 ? "font-medium text-teal" : "text-navy/50"}`}>
               {remainingUnits}
             </span>
           </div>
@@ -389,14 +389,14 @@ export function ExpenseForm({
                 onChange={(e) => setCustomAmount(p.id, e.target.value)}
                 placeholder="0.00"
                 disabled={expenseAmount <= 0}
-                className="w-24 rounded-lg border border-navy/20 px-2 py-1 text-right text-base focus:outline-none focus:ring-1 focus:ring-teal/40 disabled:bg-beige"
+                className="input-compact w-24"
               />
             </label>
           ))}
           <div className="mt-1 flex justify-between text-sm">
             <span className="text-navy/50">Remaining to split</span>
             {/* Teal when the split is balanced — same threshold as the submit guard */}
-            <span className={expenseAmount > 0 && Math.abs(remaining) <= RECONCILED_EPSILON ? "font-medium text-teal" : "text-navy/50"}>
+            <span className={`tabular-nums ${expenseAmount > 0 && Math.abs(remaining) <= RECONCILED_EPSILON ? "font-medium text-teal" : "text-navy/50"}`}>
               ₱{remaining.toFixed(2)}
             </span>
           </div>

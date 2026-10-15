@@ -68,6 +68,34 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
+/* ─── Focus ring ────────────────────────────────────────────────────────────
+   Keyboard focus for buttons and links — outline, not box-shadow, so card shadows
+   and transitions are untouched. Solid teal for contrast; inputs keep their own ring. */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 2px;
+}
+/* Teal disappears against navy, so dark surfaces get a cream ring instead */
+.card-navy :focus-visible,
+.overlay-backdrop :focus-visible {
+  outline-color: var(--color-beige);
+}
+
+/* ─── Header material ───────────────────────────────────────────────────────
+   Sticky header as a frosted layer: content scrolls visibly underneath instead of vanishing
+   behind a solid strip. Falls back to solid navy when the user asks for less transparency. */
+.header-material {
+  background-color: color-mix(in srgb, var(--color-navy) 85%, transparent);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .header-material {
+    background-color: var(--color-navy);
+    backdrop-filter: none;
+  }
+}
+
 /* ─── Component classes ─────────────────────────────────────────────────────
    Plain CSS (no @apply) for Turbopack compatibility — Turbopack does not run
    PostCSS plugins, so @apply is never processed. Colors reference the custom
@@ -135,7 +163,7 @@ body {
   transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out),
     border-color 150ms var(--ease-out), transform 140ms var(--ease-out);
 }
-.btn-toggle:active { transform: scale(var(--press-inline)); }
+.btn-toggle:active:not(:disabled) { transform: scale(var(--press-inline)); }
 .btn-toggle-active  { background-color: var(--color-navy); border-color: var(--color-navy); color: #ffffff; }
 .btn-toggle-inactive { background-color: #ffffff; border-color: var(--color-navy-20); color: var(--color-navy-60); }
 
@@ -147,7 +175,7 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-/* Tappable card — recent-session links. Presses like a button; the lift is
+/* Tappable card — recent-session links, participant rows. Presses like a button; the lift is
    pointer-only, since touch fires hover on tap and would leave it stuck raised. */
 .card-interactive {
   transition: transform 160ms var(--ease-out), box-shadow 160ms var(--ease-out),
@@ -170,24 +198,42 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-/* Text input / select */
-.input {
-  width: 100%;
-  border-radius: 0.75rem;
+/* Shared field look — .input (full-width text/select) and .input-compact (small number field) */
+.input,
+.input-compact {
   border: 1px solid var(--color-navy-20);
   background-color: #ffffff;
-  padding: 0.625rem 0.75rem;
   font-size: 1rem;
   line-height: 1.5rem;
   color: var(--color-navy);
   transition: box-shadow 150ms var(--ease-out), border-color 150ms var(--ease-out);
 }
-.input::placeholder { color: var(--color-navy-30); }
-.input:focus {
+.input::placeholder,
+.input-compact::placeholder { color: var(--color-navy-30); }
+.input:focus,
+.input-compact:focus {
   outline: none;
   border-color: var(--color-teal-40);
   box-shadow: 0 0 0 3px var(--color-teal-20);
 }
+
+/* Text input / select */
+.input {
+  width: 100%;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.75rem;
+}
+
+/* Small right-aligned number field — per-person units/amounts in Quantity and Custom splits.
+   No width here: callers size it with a w-* utility. Disabled background lives here too,
+   since an unlayered background would beat a disabled:bg-* utility. */
+.input-compact {
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.input-compact:disabled { background-color: var(--color-beige); }
 
 /* Bare icon buttons — the ✕/✎/⠿ glyphs on expense and participant rows. Deeper
    press than a labelled button: the tap target is small, so the feedback has to
@@ -196,6 +242,54 @@ body {
   transition: color 150ms var(--ease-out), transform 140ms var(--ease-out), opacity 150ms var(--ease-out);
 }
 .icon-btn:active:not(:disabled) { transform: scale(0.88); }
+/* Invisible hit area, exactly 44px tall and centred on the button without changing layout — a
+   button already 44px tall gains no vertical bleed into the row below. Horizontal bleed stays at
+   4px so neighbours 8px apart (✎ and ✕) meet but never overlap. */
+.icon-btn::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 22px);
+  height: 44px;
+  left: -4px;
+  right: -4px;
+}
+/* Anchors the hit area. Layered so a positioning utility (the QR close button's `absolute`) still wins. */
+@layer components {
+  .icon-btn { position: relative; }
+}
+
+/* Borderless buttons and links — "View breakdown", "Change", "← Home", the QR thumbnail tile.
+   A 0.97 scale alone is invisible on a short word, so the press also dims, like iOS text buttons. */
+.text-btn {
+  transition: transform 140ms var(--ease-out), opacity 150ms var(--ease-out);
+}
+.text-btn:active:not(:disabled) {
+  transform: scale(var(--press-inline));
+  opacity: 0.7;
+}
+
+/* ─── Label crossfade ───────────────────────────────────────────────────────
+   For <SwapLabel> ("Copy" → "Copied!"). Both labels share one grid cell, so the
+   cell sizes to the wider label; a short blur blends them into one changing word
+   instead of two overlapping ones. Repeatable, unlike the entrance primitives. */
+.label-swap {
+  display: inline-grid;
+  justify-items: center;
+}
+.label-swap > * {
+  grid-area: 1 / 1;
+  transition: opacity 200ms var(--ease-out), filter 200ms var(--ease-out);
+}
+/* Hidden label: the active one at rest, the idle one once swapped */
+.label-swap > :last-child,
+.label-swap[data-swapped="true"] > :first-child {
+  opacity: 0;
+  filter: blur(2px);
+}
+.label-swap[data-swapped="true"] > :last-child {
+  opacity: 1;
+  filter: none;
+}
 
 /* ─── Heading serif ─────────────────────────────────────────────────────────
    Instrument Serif, used for user-supplied titles (a session name) only.
@@ -349,13 +443,24 @@ body {
    Full-screen QR view. The panel scales from center, not from a trigger: a
    modal isn't anchored to the thing that opened it, so origin-awareness would
    be wrong here. Scale starts at 0.95, never 0 — nothing real appears from
-   nothing. */
+   nothing. The scrim's blur thickens in step with its fade. */
 .overlay-backdrop {
   opacity: 1;
-  backdrop-filter: blur(3px);
-  transition: opacity 200ms var(--ease-out);
+  background-color: color-mix(in srgb, var(--color-navy) 80%, transparent);
+  backdrop-filter: blur(12px);
+  transition: opacity 200ms var(--ease-out), backdrop-filter 200ms var(--ease-out);
 
-  @starting-style { opacity: 0; }
+  @starting-style {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+}
+/* Less transparency requested: near-solid scrim, no blur */
+@media (prefers-reduced-transparency: reduce) {
+  .overlay-backdrop {
+    background-color: color-mix(in srgb, var(--color-navy) 95%, transparent);
+    backdrop-filter: none;
+  }
 }
 .overlay-panel {
   opacity: 1;
@@ -384,8 +489,9 @@ body {
   .btn-primary:active:not(:disabled),
   .btn-secondary:active:not(:disabled),
   .btn-compact:active:not(:disabled),
-  .btn-toggle:active,
+  .btn-toggle:active:not(:disabled),
   .icon-btn:active:not(:disabled),
+  .text-btn:active:not(:disabled),
   .card-interactive:active,
   .card-interactive:hover {
     transform: none;

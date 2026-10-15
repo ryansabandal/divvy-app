@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
@@ -35,6 +35,8 @@ export default function SettlePage() {
 
   // Holds an error message from Finalize / Recalculate / Toggle-paid if the server returns non-2xx
   const [actionError, setActionError] = useState<string | null>(null);
+  // Settlement ids whose paid-toggle PATCH is still in flight
+  const pendingToggles = useRef(new Set<string>());
 
   if (error) {
     return <main className="flex-1 px-4 py-10 text-center text-red-500">{error.message}</main>;
@@ -83,26 +85,63 @@ export default function SettlePage() {
     await mutate();
   }
 
-  // Flip one payment's paid state, then refetch so the progress bar and styling stay in sync
+  // Flip one payment's paid state on screen instantly, PATCH it, then refetch once every toggle has landed
   async function handleTogglePaid(settlementId: string, currentlyPaid: boolean) {
+    // A second tap on a row that's still saving is ignored, so two opposite PATCHes never race
+    if (pendingToggles.current.has(settlementId)) return;
+    pendingToggles.current.add(settlementId);
     setActionError(null);
-    const res = await fetch(`/api/sessions/${sessionId}/settlements/${settlementId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paid: !currentlyPaid }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setActionError(body.error ?? "Failed to update payment");
-      return;
+
+    // Sends the PATCH; throws on a non-2xx so SWR rolls the optimistic flip back
+    async function patchPaid(): Promise<undefined> {
+      const res = await fetch(`/api/sessions/${sessionId}/settlements/${settlementId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paid: !currentlyPaid }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "Failed to update payment");
+      }
+      return undefined;
     }
-    await mutate();
+
+    try {
+      await mutate(patchPaid(), {
+        // Flips just this row in what's on screen (which may already hold other rows' pending flips),
+        // so checkbox, tint and progress bar update together
+        optimisticData: (committed, displayed) => {
+          const base = displayed ?? committed ?? { frozen, stale, settlements };
+          return {
+            ...base,
+            settlements: base.settlements.map((s) =>
+              s.id === settlementId ? { ...s, paid: !currentlyPaid } : s,
+            ),
+          };
+        },
+        // The PATCH returns one settlement, not the whole response, so it must not overwrite the cache
+        populateCache: false,
+        rollbackOnError: true,
+        // No per-toggle refetch — the single refetch below runs only after every pending PATCH has landed
+        revalidate: false,
+      });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to update payment");
+    } finally {
+      pendingToggles.current.delete(settlementId);
+      // Last toggle out re-reads the server, so the screen always ends on what was actually saved
+      if (pendingToggles.current.size === 0) await mutate();
+    }
   }
 
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <h1 className="text-3xl font-bold text-navy mb-1">Settle up</h1>
+        {/* Back to the session view to keep editing expenses */}
+        <Link href={`/${sessionId}`} className="text-btn mb-4 inline-block text-sm font-medium text-teal">
+          ← Back to expenses
+        </Link>
+        <h1 className="text-3xl font-bold tracking-tight text-navy mb-1">Settle up</h1>
         <p className="text-sm text-navy/50 mb-4">
           {frozen ? "Track who's paid back" : "Who owes who, with the fewest payments"}
         </p>
@@ -156,7 +195,7 @@ export default function SettlePage() {
                           type="checkbox"
                           checked={!!s.paid}
                           onChange={() => handleTogglePaid(s.id!, !!s.paid)}
-                          className="accent-teal"
+                          className="h-5 w-5 shrink-0 accent-teal"
                         />
                       )}
                       <span className={`settlement-text text-base ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
@@ -165,7 +204,7 @@ export default function SettlePage() {
                         <span className="font-semibold">{s.to_name}</span>
                       </span>
                     </label>
-                    <span className={`settlement-text font-semibold ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
+                    <span className={`settlement-text font-semibold tabular-nums ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
                       ₱{s.amount.toFixed(2)}
                     </span>
                   </div>
@@ -193,15 +232,10 @@ export default function SettlePage() {
               onClick={frozen ? handleRecalculate : handleFinalize}
               className={frozen ? "btn-secondary mt-6" : "btn-primary mt-6"}
             >
-              {frozen ? "Recalculate" : "Finalize Expenses"}
+              {frozen ? "Recalculate" : "Finalize plan"}
             </button>
           </>
         )}
-
-        {/* Back to the session view to keep editing expenses */}
-        <Link href={`/${sessionId}`} className="mt-4 block text-center text-sm text-navy/40 underline">
-          ← Back to expenses
-        </Link>
       </div>
     </main>
   );

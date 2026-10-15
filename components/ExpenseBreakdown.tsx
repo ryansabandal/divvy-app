@@ -44,7 +44,7 @@ export function ExpenseBreakdown({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={panelId}
-        className="text-xs font-medium text-teal"
+        className="text-btn text-xs font-medium text-teal"
       >
         {open ? "Hide breakdown" : "View breakdown"}
       </button>
@@ -61,7 +61,7 @@ export function ExpenseBreakdown({
                   {c.units != null ? ` ×${c.units}` : ""}
                   {!hidePayerName && <span className="text-navy/40"> · {c.payerName} paid</span>}
                 </span>
-                <span className="shrink-0 text-navy">₱{c.amountOwed.toFixed(2)}</span>
+                <span className="shrink-0 tabular-nums text-navy">₱{c.amountOwed.toFixed(2)}</span>
               </li>
             ))}
           </ul>
@@ -72,7 +72,7 @@ export function ExpenseBreakdown({
             <>
               <div className="mt-1.5 flex justify-between border-t border-navy/10 pt-1.5 text-navy/50">
                 <span>Total charged</span>
-                <span>₱{totalCharged.toFixed(2)}</span>
+                <span className="tabular-nums">₱{totalCharged.toFixed(2)}</span>
               </div>
               {payments.map((p) => (
                 <div key={p.expenseId} className="flex justify-between gap-2 text-navy/50">
@@ -80,7 +80,7 @@ export function ExpenseBreakdown({
                     Less {p.description}
                     <span className="text-navy/40"> · they paid</span>
                   </span>
-                  <span className="shrink-0">−₱{p.amount.toFixed(2)}</span>
+                  <span className="shrink-0 tabular-nums">−₱{p.amount.toFixed(2)}</span>
                 </div>
               ))}
             </>
@@ -88,7 +88,7 @@ export function ExpenseBreakdown({
 
           <div className="mt-1.5 flex justify-between border-t border-navy/10 pt-1.5 font-medium text-navy">
             <span>Net owed</span>
-            <span>₱{netOwed.toFixed(2)}</span>
+            <span className="tabular-nums">₱{netOwed.toFixed(2)}</span>
           </div>
 
           {!coversWholeNet && (

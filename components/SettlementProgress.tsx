@@ -41,7 +41,7 @@ export function SettlementProgress({
       {/* "payments settled" / "transferred" rather than a bare "paid" — this line sits directly
           under the summary's "Total bill" tile, and ₱X-of-₱Y here is money that changes hands
           after netting, always ≤ the bill. Naming both keeps them from reading as a discrepancy. */}
-      <p className="mt-1.5 text-xs text-navy/50">
+      <p className="mt-1.5 text-xs tabular-nums text-navy/50">
         {paidSettlements.length} of {settlements.length} payments settled · ₱
         {paidAmount.toFixed(2)} of ₱{totalAmount.toFixed(2)} transferred
       </p>

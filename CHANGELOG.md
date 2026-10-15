@@ -2,14 +2,31 @@
 
 Dated record of what changed, why, and how it was verified — migration phases, hardening audits, and V2 planning notes. For current architecture, see [README.md](README.md); for product scope, see [CLAUDE.md](CLAUDE.md); for local setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-> **Current priority (updated 2026-09-13) — resume the deferred holistic-review work below.**
-> Cluster E is now fully shipped: Slice 2 (`PaymentMethodEditor` extraction + qr-12) and Slice 3
-> (`ExpenseList`/`ExpenseForm` extraction, closing h18 + h14) both landed this session, each 3-lens
-> reviewed and fixed — see their dated entries below. `.scratch/plans/session-page-decomposition.md`
-> is fully executed. Open choices for next session: ticket 39 (`handleQrRemove` missing `finally`,
-> filed during Slice 2), writing up the pre-settled QR 08/09/11 decisions, or h36's direction
-> (expense cap unenforced under concurrency). The animation follow-up work (plans 002-005) was
-> 3-lens reviewed and fixed the same day — see "Animation follow-up sweep" below.
+> **Next session's top priority (set 2026-09-13): align all reference documentation with the
+> current codebase.** User-requested, ahead of the holistic-review backlog below. Scope: `README.md`,
+> `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `docs/agents/*.md`, plus a new **`architecture.md`**
+> (doesn't exist yet — to be created, not just updated) — re-diff each against actual source rather
+> than trusting prior doc passes, which have gone stale before (see ticket h20 below and the "Docs
+> Cleanup (2026-08-28)" pass in memory, both narrower than what's now being asked). `architecture.md`
+> should capture the current component structure directly, including the `app/[sessionId]/_components/`
+> vs. `components/` split (single-page-only vs. shared-across-pages) that Cluster E's three slices
+> established and exercised.
+> **h20 names a concrete starting point:** `CLAUDE.md`'s inline Prisma schema block already
+> contradicts `prisma/schema.prisma` and CLAUDE.md's own prose (missing `qr_object_path`, missing
+> cascade deletes), and its own history shows this drifts every time schema/module changes land
+> without a doc pass — h20's suggested root-cause fix (replace the duplicated schema block with a
+> pointer to the file, so it can't go stale independently) is worth considering instead of another
+> resync. Also stale by now: CLAUDE.md's Project Structure listing (missing several `lib/`/`components/`
+> files added since), and likely README.md/CHANGELOG.md references to Cluster E's now-completed
+> session-page decomposition. **Not started — this is a queued instruction for next session, no
+> files touched yet.**
+>
+> **Deferred behind the above:** ticket 39 (`handleQrRemove` missing `finally`, filed during Cluster
+> E Slice 2), writing up the pre-settled QR 08/09/11 decisions, and h36's direction (expense cap
+> unenforced under concurrency). Cluster E (session-page decomposition, h18/h14/qr-12) is fully
+> shipped — see the dated "Cluster E Slice 2"/"Cluster E Slice 3" entries below. The animation
+> follow-up work (plans 002-005) was 3-lens reviewed and fixed the same day — see "Animation
+> follow-up sweep" below.
 >
 > **Deferred, not dropped — resume now:** the holistic code review fix plan below
 > (updated 2026-08-28). This session ran the full 3-lens subagent review (Correctness/Security/
@@ -298,6 +315,132 @@ before Slice 1). `SortableExpenseCard` moved into `ExpenseList.tsx` alongside it
   an expense in each of the three split modes, confirmed edit pre-fill, Cancel reverting to blank
   add-mode, delete-while-editing resetting the form, re-click-Edit re-seeding (the fix above), and a
   pointer-drag reorder surviving a page reload.
+
+### Apple-design pass, 10 rows + 3-lens review (2026-10-15)
+
+An `apple-design` review (Apple's WWDC fluid-interface principles, translated to the web), run
+straight after the UI polish pass below and skipping everything that pass and the 2026-09-12 motion
+pass already shipped. It produced a 13-row table. Rows 1–10 were applied one at a time with a browser
+check after each, then 3-lens reviewed and fixed in the same change.
+
+- **Paid checkbox responds instantly.** It used to stay unticked until the PATCH and refetch finished
+  (about 200–500 ms on Vercel + Supabase). `handleTogglePaid` now uses SWR's
+  `mutate(patchPaid(), { optimisticData, rollbackOnError })`, so the tick, strikethrough, paid tint
+  and progress bar all update on the tap.
+  - `populateCache: false` is required, because the PATCH returns one `Settlement`, not the
+    `SettlementsResponse` the cache holds.
+  - A failed save rolls back and shows the server's error in the existing `actionError` line.
+- **Dragged expense card stays solid.** No DragOverlay is used, so the `<li>` itself follows the
+  finger. It was `opacity-50`, which read as left behind. It's now `z-10` and keeps its shadow lift.
+  dnd-kit's sort transition uses `var(--ease-out)` instead of the stock `ease`.
+- **44px tap targets for glyph buttons.** `.icon-btn::after` is an invisible hit area exactly 44px
+  tall and centred, with a 4px bleed sideways. It applies to ✎ / ✕ / the QR close button, and to the
+  ⠿ drag handle, which joined `.icon-btn`.
+  - `.icon-btn { position: relative }` is the only rule in `@layer components`, on purpose. Unlayered,
+    it would beat the QR close button's `absolute` utility.
+- **Materials.**
+  - The sticky header is `.header-material`: navy at 85% with `backdrop-filter: blur(20px)
+    saturate(180%)`.
+  - The QR overlay's scrim went from a 3px blur to 12px and now animates from `blur(0)` alongside its
+    fade. Its 80% tint moved from `bg-navy/80` into `.overlay-backdrop`, next to its fallback.
+  - Both fall back to solid navy under `prefers-reduced-transparency`. Safari doesn't support that
+    query yet, so the fallback only works in Chromium.
+- **Wayfinding and copy.**
+  - `scroll-pt-16` on `<html>`, so "Edit" scrolls the form below the sticky header instead of under
+    it.
+  - That scroll jumps instead of gliding under `prefers-reduced-motion`.
+  - The settle page's "← Back to expenses" moved from the bottom to the top, matching "← Home".
+  - "Finalize Expenses" is now "Finalize plan": it freezes the plan, and expenses stay editable.
+  - `tracking-tight` on the bold "New session" and "Settle up" headings.
+- **Stacking order:** dragged card `z-10` < header `z-20` < QR overlay `z-50`. The header was `z-10`,
+  which a dragged card at the same z-index would have painted over.
+- **Review (Correctness / Security / Best-Practice): one Medium, and the rest Low. All were fixed
+  except four skipped by choice.**
+  - **Medium: the optimistic flip started from stale data.** SWR calls `optimisticData(committed,
+    displayed)`, and the first version read only `committed`. Ticking row B while row A was still
+    saving visibly un-ticked A. It now starts from `displayed`.
+  - **Concurrent toggles.** Out-of-order commits, or a superseded mutation (SWR skips its refetch),
+    could leave the screen disagreeing with the database. Now:
+    - A second tap on a row that's still saving is ignored (a `useRef` set; no `disabled`, so nothing
+      flickers grey).
+    - Each toggle sets `revalidate: false`.
+    - One `mutate()` refetch runs once no toggles are pending.
+  - **Wrong-participant removal.** The first hit-area version was a fixed 10px bleed. The home page's
+    ✕ already stretches to its 44px input, so the bleed overlapped the next row's ✕, and a tap in
+    the gap removed the participant below. That's why the hit area is now a fixed 44px, centred.
+  - **Comment fixes:** history-flavoured wording, a hard-coded "52px", and the stacking order written
+    down on the header.
+  - **Skipped:**
+    - Unifying `ExpenseList.handleDragEnd`'s hand-rolled optimistic update with the SWR-native one
+      (it predates this pass).
+    - Consolidating the two reduced-transparency blocks (each is kept next to the rule it overrides).
+    - A reduced-motion guard on dnd-kit's sort transition (unguarded before this pass too).
+    - A `.back-link` class (only two call sites).
+- **Gotcha: a "restart" that didn't restart.** After `rm -rf .next` and a restart, the served CSS was
+  still stale, because the server on port 3000 was still the old process. `ps -o lstart -C
+  next-server` and the `.next` directory's timestamp showed it. Check both before assuming the cache
+  survived a clear.
+
+### UI polish pass, 12 rows + 3-lens review (2026-10-15)
+
+An `emil-design-eng` review of the UI after the 2026-09-12 motion pass, deliberately skipping what
+that pass already covered. It produced a 12-row Before/After table, applied one row at a time with a
+browser check after each, then 3-lens reviewed and fixed in the same change (CLAUDE.md: review fixes
+fold into the change, no second review cycle).
+
+- **Press feedback, filling the gaps.** The participant rows on the session page now use the existing
+  `.card-interactive`. A new `.text-btn` class (`--press-inline` scale plus a dim to 0.7 opacity,
+  since a 0.97 scale alone can't be seen on a short word) covers the borderless buttons and links:
+  "View breakdown", both "Change" links, "Cancel", "Use {name}", "+ Add another person", "← Home",
+  "← Back to expenses", and the QR "Tap to enlarge" tile. The drag handle is deliberately excluded,
+  because `:active` holds for the whole drag. `.btn-toggle` gained the `:not(:disabled)` guard the
+  other button classes already had, so payment tabs no longer press while a save is in flight.
+- **Keyboard focus.** A global `button:focus-visible, a:focus-visible` outline in solid teal (teal-40
+  failed the ~3:1 contrast a focus indicator needs on cream), switching to cream inside `.card-navy`
+  and `.overlay-backdrop`, where teal disappears against navy. It uses `outline`, not `box-shadow`, so
+  card shadows and transitions are untouched.
+- **Numbers.** `tabular-nums` on every right-aligned or live-updating peso amount: settle and view
+  rows, `ExpenseRow`, `ExpenseBreakdown`, the `SettlementProgress` caption, and the split form's
+  remaining amount, remaining units and per-unit price.
+- **`.input-compact`.** The per-person unit/amount fields in `ExpenseForm` had their own 1px focus
+  ring. They now share `.input`'s look through grouped selectors. This is not a combined
+  `class="input input-compact"`, because `.input`'s unlayered `width: 100%` would beat the caller's
+  `w-20`. The disabled background moved into the class for the same reason.
+- **`components/SwapLabel.tsx` + `.label-swap`.** "Copy" → "Copied!" (and the two "Link copied!"
+  buttons) now crossfade with a 2px blur instead of snapping. Both labels stay mounted in one grid
+  cell, so the button is always as wide as the longer label, and `aria-hidden` is set on whichever
+  label is hidden. A keyed `@starting-style` span was rejected because it would also animate every
+  button on page load.
+- **Smaller consistency fixes.**
+  - 20px (`h-5 w-5 shrink-0`) checkboxes, up from the native ~13px.
+  - The session page's loading and error colours now match the settle and view pages.
+  - The header and the QR close button use the ink-tinted `--shadow-*` tokens via
+    `shadow-(--shadow-sm|md)`, Tailwind v4's custom-property syntax.
+  - `PaymentMethodEditor`'s hand-built card became `.card`.
+  - `text-balance` on the session-name `h1`.
+- **Review (Correctness / Security / Best-Practice): no High or Medium findings; Security was clean.**
+  All 10 Low and nit findings were fixed.
+  - **Row 3 was redundant and was removed.** It set `-webkit-tap-highlight-color: transparent` on
+    `button, a, label`, but Tailwind's preflight already sets it on `html` and the property inherits,
+    so there was never a grey tap flash to remove.
+  - The remaining fixes: missed sibling sites (four live-updating amounts, two black shadows, two
+    back links), `shrink-0` so long names can't squash the checkboxes, `self-start` so the
+    payer-tile "Change" doesn't stretch across the tile, and stale or misplaced comments and section
+    banners in `globals.css`.
+- **Gotcha: Turbopack served stale `globals.css` chunks three times this session, and a plain
+  restart did not fix it.** Its persistent cache (`.next/dev/cache/turbopack`) survives a restart,
+  and `touch` doesn't bust it, because the cache keys on content. It happened when `globals.css` got
+  several writes seconds apart.
+  - To diagnose, `curl` the served `/_next/static/...css` chunk and grep for the new rule. Compiling
+    by hand (postcss + `@tailwindcss/postcss` + lightningcss) ruled out the pipeline itself dropping
+    rules.
+  - A real content edit sometimes nudged it. Only `rm -rf .next` + restart cleared it reliably.
+  - Check the served CSS after every `globals.css` edit, before judging a UI change in the browser.
+- **Out of scope, filed as a follow-up task:** `QrFileInput`'s `<input>` is `display: none`, so
+  keyboard users can't reach the QR picker. This predates the pass and was flagged by the review.
+- **Verified:** `npx tsc --noEmit` clean, `vitest run lib` 28/28, `npm run lint` 0 errors (1
+  pre-existing warning), the served dev CSS checked rule by rule, and the user browser-checked each
+  row plus the review fixes.
 
 ### Serverless migration (complete — 2026-07-26)
 

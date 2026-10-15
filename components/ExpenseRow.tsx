@@ -68,11 +68,11 @@ export function ExpenseRow({
         )}
         {actions ? (
           <div className="ml-2 flex shrink-0 items-center gap-2">
-            <span className="font-semibold text-white">₱{expense.amount.toFixed(2)}</span>
+            <span className="font-semibold tabular-nums text-white">₱{expense.amount.toFixed(2)}</span>
             {actions}
           </div>
         ) : (
-          <span className="font-semibold text-white">₱{expense.amount.toFixed(2)}</span>
+          <span className="font-semibold tabular-nums text-white">₱{expense.amount.toFixed(2)}</span>
         )}
       </div>
       {/* Skipped entirely when neither half has anything to say — the element carries mt-1, so an
@@ -92,7 +92,7 @@ export function ExpenseRow({
               {s.participant.name}
               {unitCount !== null && s.units != null ? ` ×${s.units}` : ""}
             </span>
-            <span>₱{s.amount_owed.toFixed(2)}</span>
+            <span className="tabular-nums">₱{s.amount_owed.toFixed(2)}</span>
           </li>
         ))}
       </ul>

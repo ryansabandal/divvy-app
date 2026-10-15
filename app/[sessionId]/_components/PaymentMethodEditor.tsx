@@ -174,7 +174,7 @@ export function PaymentMethodEditor({
   }
 
   return (
-    <div className="panel-reveal mt-2 flex flex-col gap-2 rounded-2xl border border-navy/10 bg-white p-4 shadow-sm">
+    <div className="card panel-reveal mt-2 flex flex-col gap-2 p-4">
       <div className="flex flex-wrap gap-2">
         {PAYMENT_TABS.map((tab) => (
           <button

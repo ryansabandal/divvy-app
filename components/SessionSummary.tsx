@@ -65,7 +65,7 @@ export function SessionSummary({
             <button
               type="button"
               onClick={onChangePayer}
-              className="text-left text-xs font-medium text-teal underline"
+              className="text-btn self-start text-left text-xs font-medium text-teal underline"
             >
               Change
             </button>

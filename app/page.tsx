@@ -94,7 +94,7 @@ export default function CreateSessionPage() {
           </section>
         )}
 
-        <h1 className="text-3xl font-bold text-navy mb-1">New session</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-navy mb-1">New session</h1>
         <p className="text-sm text-navy/50 mb-8">Name the bill and add everyone splitting it.</p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -138,7 +138,7 @@ export default function CreateSessionPage() {
             <button
               type="button"
               onClick={addParticipant}
-              className="self-start text-sm font-medium text-teal"
+              className="text-btn self-start text-sm font-medium text-teal"
             >
               + Add another person
             </button>

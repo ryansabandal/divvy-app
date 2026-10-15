@@ -50,7 +50,7 @@ export default function ViewPage() {
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
-        <h1 className="heading-title text-3xl text-navy mb-4">{session.name}</h1>
+        <h1 className="heading-title text-3xl text-balance text-navy mb-4">{session.name}</h1>
 
         {/* Stale-plan warning shown above the summary tiles, not just above the progress bar:
             once expenses change post-finalize, SessionSummary's live "Total bill" and
@@ -110,7 +110,7 @@ export default function ViewPage() {
                           <span className="text-navy/30"> → </span>
                           <span className="font-semibold">{s.to_name}</span>
                         </span>
-                        <span className={`settlement-text font-semibold ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
+                        <span className={`settlement-text font-semibold tabular-nums ${s.paid ? "text-navy/30 line-through" : "text-navy"}`}>
                           ₱{s.amount.toFixed(2)}
                         </span>
                       </div>

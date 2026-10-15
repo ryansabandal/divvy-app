@@ -374,3 +374,30 @@ sequenceDiagram
   dragged expense card lifts its shadow; and finishing a plan shows a one-time "🎉 Everyone's settled
   up" line (`.enter-pop`). Detail, including the mid-implementation cascade fix `.settlement-row`
   required: [CHANGELOG.md](CHANGELOG.md#animation-follow-up-sweep-5-plans-written-and-executed-2026-09-12).
+- **UI polish pass (2026-10-15)** — filled the gaps the motion pass left:
+  - `.text-btn` press feedback (scale + dim) on borderless buttons and links.
+  - A global `:focus-visible` outline: teal, cream on navy surfaces.
+  - `tabular-nums` on every right-aligned or live-updating amount.
+  - `.input-compact` for the split form's per-person fields, sharing `.input`'s focus ring through
+    grouped selectors.
+  - `components/SwapLabel.tsx` for the "Copy" → "Copied!" crossfade. Both labels are stacked in one
+    grid cell, so the button never changes width.
+  - 20px checkboxes, and the remaining black shadows moved to the `--shadow-*` tokens.
+
+  If a `globals.css` change doesn't show up in `next dev`, Turbopack may be serving a stale chunk
+  that survives a restart; `rm -rf .next` clears it. Detail:
+  [CHANGELOG.md](CHANGELOG.md#ui-polish-pass-12-rows--3-lens-review-2026-10-15).
+- **Apple-design pass (2026-10-15)** — fluid-interface details on top of the polish pass:
+  - The paid checkbox updates instantly (SWR optimistic `mutate` with rollback, one refetch after
+    the last pending toggle).
+  - A dragged expense card stays solid and raised, and the sort uses `--ease-out`.
+  - Glyph buttons get a 44px invisible hit area (`.icon-btn::after`).
+  - The header and QR scrim are translucent materials (`backdrop-filter`), solid under
+    `prefers-reduced-transparency`.
+  - Wayfinding:
+    - `scroll-pt-16` keeps scroll targets clear of the sticky header.
+    - The settle page's back link sits at the top.
+    - The button reads "Finalize plan".
+
+  Stacking order: dragged card `z-10` < header `z-20` < QR overlay `z-50`. Detail:
+  [CHANGELOG.md](CHANGELOG.md#apple-design-pass-10-rows--3-lens-review-2026-10-15).

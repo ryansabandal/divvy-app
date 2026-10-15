@@ -10,6 +10,7 @@ import { PAYMENT_METHOD_LABELS } from "@/lib/paymentDetails";
 import { fetcher } from "@/lib/fetcher";
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard";
 import { SessionSummary } from "@/components/SessionSummary";
+import { SwapLabel } from "@/components/SwapLabel";
 import { PaymentMethodEditor } from "./_components/PaymentMethodEditor";
 import { ExpenseList } from "./_components/ExpenseList";
 import { ExpenseForm } from "./_components/ExpenseForm";
@@ -61,10 +62,10 @@ export default function SessionPage() {
   const [expandedParticipantId, setExpandedParticipantId] = useState<string | null>(null);
 
   if (error) {
-    return <main className="flex-1 px-4 py-10 text-center text-red-600">{error.message}</main>;
+    return <main className="flex-1 px-4 py-10 text-center text-red-500">{error.message}</main>;
   }
   if (!session) {
-    return <main className="flex-1 px-4 py-10 text-center text-gray-500">Loading…</main>;
+    return <main className="flex-1 px-4 py-10 text-center text-navy/40">Loading…</main>;
   }
 
   // Defaults derived at render time (never via a setState in an effect): until the user picks a
@@ -100,7 +101,9 @@ export default function SessionPage() {
   function handleStartEdit(expense: Expense) {
     setEditingExpense(expense);
     setEditClickCount((n) => n + 1);
-    addExpenseSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Jumps instead of gliding when the user has asked for reduced motion
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    addExpenseSectionRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
   }
 
   // Fires after ExpenseForm submits successfully. Refetches first, then clears editingExpense (so
@@ -117,12 +120,12 @@ export default function SessionPage() {
     <main className="flex-1 flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-sm">
         {/* Back to the home page, e.g. to start or return to a different session */}
-        <Link href="/" className="mb-4 inline-block text-sm font-medium text-teal">
+        <Link href="/" className="text-btn mb-4 inline-block text-sm font-medium text-teal">
           ← Home
         </Link>
         {/* Serif upright, not italic and not bold — Instrument Serif is weight-400 only,
             so font-bold would synthesise a fake bold rather than load a real one */}
-        <h1 className="heading-title text-3xl text-navy mb-4">{session.name}</h1>
+        <h1 className="heading-title text-3xl text-balance text-navy mb-4">{session.name}</h1>
 
         <SessionSummary
           expenses={session.expenses}
@@ -169,7 +172,7 @@ export default function SessionPage() {
                 <button
                   type="button"
                   onClick={() => toggleExpandParticipant(p)}
-                  className="card flex w-full items-center justify-between px-4 py-3 text-left text-sm"
+                  className="card card-interactive flex w-full items-center justify-between px-4 py-3 text-left text-sm"
                 >
                   <span className="font-medium text-navy">{p.name}</span>
                   <span className={`text-xs ${p.payment_method_type || p.qr_code_url ? "text-teal font-medium" : "text-navy/40"}`}>
@@ -214,7 +217,7 @@ export default function SessionPage() {
               <button
                 type="button"
                 onClick={() => setEditingExpense(null)}
-                className="text-sm font-medium text-navy/50"
+                className="text-btn text-sm font-medium text-navy/50"
               >
                 Cancel
               </button>
@@ -236,7 +239,7 @@ export default function SessionPage() {
           onClick={() => copySessionLink(`${window.location.origin}/${sessionId}`)}
           className="btn-secondary mt-6"
         >
-          {copiedSessionLink ? "Link copied!" : "Copy session link"}
+          <SwapLabel swapped={copiedSessionLink} idle="Copy session link" active="Link copied!" />
         </button>
 
         {/* Share a read-only link with participants so they can see what they owe */}
@@ -245,7 +248,7 @@ export default function SessionPage() {
           onClick={() => copyShareLink(`${window.location.origin}/${sessionId}/view`)}
           className="btn-secondary mt-3"
         >
-          {copiedShareLink ? "Link copied!" : "Share view link"}
+          <SwapLabel swapped={copiedShareLink} idle="Share view link" active="Link copied!" />
         </button>
 
         {/* Settlement screen: who owes who, plus mark-as-paid tracking once finalized */}

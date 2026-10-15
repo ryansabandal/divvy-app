@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { parseBankDetails, PAYMENT_METHOD_LABELS } from "@/lib/paymentDetails";
 import { useCopyToClipboard } from "@/lib/useCopyToClipboard";
+import { SwapLabel } from "@/components/SwapLabel";
 import type { Participant } from "@/lib/types";
 
 // How the debtor should pay the creditor for one settlement row, based on the creditor's saved
@@ -74,7 +75,7 @@ export function PaymentAction({
           <button
             type="button"
             onClick={() => setEnlarged(true)}
-            className="flex items-center gap-2 self-start rounded-xl bg-beige px-3 py-2"
+            className="text-btn flex items-center gap-2 self-start rounded-xl bg-beige px-3 py-2"
           >
             {/* Plain <img> (not next/image) so long-press / right-click "Save image" works
                 natively once enlarged below — the payer needs to walk away with the image */}
@@ -92,7 +93,7 @@ export function PaymentAction({
               role="dialog"
               aria-modal="true"
               aria-label={`${creditorName}'s QR code, enlarged`}
-              className="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center bg-navy/80 p-6"
+              className="overlay-backdrop fixed inset-0 z-50 flex items-center justify-center p-6"
               onClick={() => setEnlarged(false)}
             >
               {/* Stops propagation so tapping the image itself doesn't close the overlay before a
@@ -108,7 +109,7 @@ export function PaymentAction({
                   type="button"
                   onClick={() => setEnlarged(false)}
                   aria-label="Close"
-                  className="icon-btn absolute -top-3 -right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white text-navy shadow-md"
+                  className="icon-btn absolute -top-3 -right-3 flex h-8 w-8 items-center justify-center rounded-full bg-white text-navy shadow-(--shadow-md)"
                 >
                   ✕
                 </button>
@@ -129,7 +130,7 @@ export function PaymentAction({
             onClick={() => handleCopy(copyText)}
             className="btn-compact shrink-0"
           >
-            {copied ? "Copied!" : "Copy"}
+            <SwapLabel swapped={copied} idle="Copy" active="Copied!" />
           </button>
         </div>
       )}

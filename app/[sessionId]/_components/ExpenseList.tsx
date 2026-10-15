@@ -41,6 +41,8 @@ function SortableExpenseCard({
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: expense.id,
+    // Cards shifting aside and the dropped card settling use the app's ease-out curve, not dnd-kit's stock `ease`
+    transition: { duration: 200, easing: "var(--ease-out)" },
   });
   // Lift the card while dragging; merged inline because dnd-kit sets `transition` on this node
   const style = {
@@ -50,7 +52,8 @@ function SortableExpenseCard({
   };
 
   return (
-    <li ref={setNodeRef} style={style} className={`card-navy p-4 ${isDragging ? "opacity-50" : ""}`}>
+    // While dragging: paints above the cards it passes over
+    <li ref={setNodeRef} style={style} className={`card-navy p-4 ${isDragging ? "z-10" : ""}`}>
       {/* enter-rise lives here, not on the <li> — dnd-kit already drives that element's own
           transform/transition, and a second transform on the same node would fight it */}
       <div className="enter-rise">
@@ -66,7 +69,7 @@ function SortableExpenseCard({
               {...attributes}
               {...listeners}
               aria-label="Reorder expense"
-              className="cursor-grab touch-none px-1 text-white/30 active:cursor-grabbing"
+              className="icon-btn cursor-grab touch-none px-1 text-white/30 active:cursor-grabbing"
             >
               ⠿
             </button>
