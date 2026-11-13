@@ -105,7 +105,7 @@ What the schema alone doesn't tell you:
 - [x] Create a session (name the bill, add participants)
 - [x] Add expenses (who paid, how much, description)
 - [x] Even split or custom amounts per participant
-- [x] Edit an expense in place (no more delete-and-recreate to fix a mistake) and drag-and-drop reorder the expense list
+- [x] Edit an expense in place and drag-and-drop reorder the expense list
 - [x] Delete an expense (fix mistakes/duplicates)
 - [x] Participant self-enters their payment method via the shared link — GCash/Maya phone number, or bank name + account number entered as separate fields (stored combined as `"Bank Name - Account Number"`; only the account number is copied on the settle screen)
 - [x] Settlement screen — who owes who (minimized transactions), with mark-as-paid tracking against a finalized plan
@@ -113,7 +113,7 @@ What the schema alone doesn't tell you:
 - [x] Display each participant's GCash/Maya number or bank account on the settle screen with a copy button so the payer can initiate the transfer themselves inside the relevant app
 - [x] Shareable read-only session link (`/[sessionId]/view`) — expense breakdown + settlement plan, no edit controls; "Share view link" button on the session page copies the URL to clipboard
 - [x] Return to a past session without login — home page shows a device-local "Your recent sessions" list (`lib/recentSessions.ts`, backed by `localStorage`, newest-first, capped at 10); "Copy session link" button on the session page for cross-device return (chosen over a raw sessionId copy/paste flow — a 36-char UUID is error-prone to hand-copy and the app already has a better container for it: the URL)
-- [x] Design pass — forest/sage/cream/warm-cream palette (refreshed 2026-08-15 from the original navy/teal/sky-blue/beige/white — token *names* unchanged, only values; see CHANGELOG.md), Instrument Serif for user-supplied titles, bento-tile summary; sticky header with Divvy wordmark; Tailwind v4 with plain CSS component classes (no `@apply` — Turbopack bypasses PostCSS, so `@apply` is never processed)
+- [x] Design pass — forest/sage/cream/warm-cream palette (the CSS tokens are still named `navy`/`teal`/`sky`/`beige` — read them as roles, not colors; see the naming note in `app/globals.css`), Instrument Serif for user-supplied titles, bento-tile summary; sticky header with Divvy wordmark; Tailwind v4 with plain CSS component classes (no `@apply` — Turbopack bypasses PostCSS, so `@apply` is never processed)
 
 ## Out of Scope for V1
 
@@ -126,7 +126,7 @@ What the schema alone doesn't tell you:
 - Proof-of-payment screenshot upload (for other participants to validate a payment) — deferred to V2 alongside OCR, not started; same file-storage infrastructure QR Ph upload already uses (see below)
 - Settlement status indicator (checkmark/"Done" on a session in the recent-sessions list once its plan is finalized and fully paid) — idea only, not scheduled; the `Settlement.paid` data already exists, but the recent-sessions list is device-local (`localStorage`), so this needs a batch status endpoint rather than one request per listed session
 
-## QR Ph Code Upload — Shipped (added 2026-08-16, post-V1-close)
+## QR Ph Code Upload
 
 The first of the deferred V2 trio (QR Ph upload, receipt OCR, proof-of-payment screenshots) to actually ship, once Supabase Storage groundwork existed for it. Receipt OCR and proof-of-payment screenshots are still not started — see "Out of Scope for V1" above.
 
@@ -160,7 +160,7 @@ Use greedy debt simplification to minimize the number of transactions:
 
 This is the standard approach used by Splitwise. Implement in `lib/settle.ts`.
 
-**Reconciliation tolerance:** balances are compared to zero using `RECONCILED_EPSILON = 0.005` (half a centavo), exported from `settle.ts` and reused by the CUSTOM-split guard in `lib/expenseSplits.ts`. A full-cent threshold (the original value) misclassifies a genuine 1-centavo balance as "already settled" and silently drops it from the plan — found in the 2026-07-19 audit, fixed the same day. Half a centavo is small enough to never swallow a real balance, large enough to absorb floating-point noise from repeated arithmetic on already-rounded amounts.
+**Reconciliation tolerance:** balances are compared to zero using `RECONCILED_EPSILON = 0.005` (half a centavo), exported from `settle.ts` and reused by the CUSTOM-split guard in `lib/expenseSplits.ts`. Don't raise it to a full cent: that misclassifies a genuine 1-centavo balance as "already settled" and silently drops it from the plan. Half a centavo is small enough to never swallow a real balance, large enough to absorb floating-point noise from repeated arithmetic on already-rounded amounts.
 
 ## Payment Display
 
@@ -171,7 +171,7 @@ Neither GCash nor Maya exposes a public deep-link URL that pre-fills a peer tran
 - **GCash / Maya:** label is `GCash ·` or `Maya ·`; the full phone number is displayed and copied.
 - **Bank Transfer:** entry form accepts bank name and account number as two separate inputs; stored in `payment_details` as `"Bank Name - Account Number"`. On the settle screen the bank name is used as the label (e.g. `BPI ·`) and **only the account number is copied** — pasting the bank name alongside the account number would be confusing and serve no purpose.
 
-**QR code (shipped 2026-08-16):** QR Ph is the BSP-standardised interoperable payment QR standard — GCash, Maya, and most bank apps can scan it — but any QR image a participant uploads works, not only QR Ph-badged ones. See "QR Ph Code Upload — Shipped" above for the full flow. It supplements the copy-to-clipboard option above rather than replacing it: the settle and read-only view screens render whichever the participant has set — QR, phone/account details, both, or neither.
+**QR code:** QR Ph is the BSP-standardised interoperable payment QR standard — GCash, Maya, and most bank apps can scan it — but any QR image a participant uploads works, not only QR Ph-badged ones. See "QR Ph Code Upload" above for the full flow. It supplements the copy-to-clipboard option above rather than replacing it: the settle and read-only view screens render whichever the participant has set — QR, phone/account details, both, or neither.
 
 Receipt OCR and proof-of-payment screenshot upload remain deferred — see "Out of Scope for V1" and "V2 File Uploads — Locked Constraints" above.
 
@@ -225,10 +225,10 @@ Settled 2026-08-21 after a confirmed exposure — every table was readable *and 
 
 Sessions older than a month are deleted automatically, so old bill-splitting data doesn't accumulate indefinitely against the free tier's storage/egress ceiling (see [Deployment](#deployment)).
 
-- **Schema side — took two migrations, not one.** `20260828021955_participant_expense_cascade_on_session_delete` made `Participant.session` and `Expense.session` cascade on Session delete, matching `Settlement.session`'s existing cascade; previously they were RESTRICT by deliberate design (see the schema comments) on the reasoning that an *accidental* delete path should fail loudly, and this cleanup job is that intentional path.
-  - **Those three were not sufficient, and the claim that they were is what let the gap ship** (ticket 26, found 2026-08-29). `ExpenseSplit.participant_id` still had no delete action, and `ExpenseSplit` is **two hops** from `Session` — reachable only via `Expense` — so Postgres runs the `Participant` cascade's referential check before the `Expense → ExpenseSplit` cascade has cleared those rows. `DELETE FROM "Session"` failed with `23503` for **any session that had expenses**, i.e. every real one. Because the job is a single statement, the whole delete rolled back and nothing was cleaned, silently. `Settlement` escaped only because it hangs directly off `Session` (one hop), which is exactly why reading the schema didn't reveal it.
-  - **Closed by `20260829005904_expensesplit_participant_cascade_on_delete`** — `ExpenseSplit.participant` now cascades too. `Settlement.debtor`/`creditor` deliberately stay restrictive: deleting a Participant outright must still fail loudly rather than void one side of a payment plan.
-  - **The lesson is the testing one, not the schema one.** The original cascade was reasoned about in schema comments and passed review; what nobody did was *run the statement*. `tests/retention.integration.test.ts` now does, and is verified to fail if the cascade is reverted.
+- **Schema side:** `Participant.session`, `Expense.session`, `Settlement.session`, and `ExpenseSplit.participant` all cascade on delete, so deleting a `Session` clears everything under it. The cleanup job is the one intentional delete path; anything else that deletes rows should still fail loudly.
+  - **`ExpenseSplit.participant` must cascade even though `ExpenseSplit.expense` already does.** `ExpenseSplit` is two hops from `Session` (via `Expense`), and Postgres runs the `Participant` cascade's referential check before the `Expense → ExpenseSplit` cascade clears those rows. Without it, `DELETE FROM "Session"` fails with `23503` for every session that has expenses. Because the job is a single statement, the whole delete then rolls back silently.
+  - **`Settlement.debtor`/`creditor` deliberately stay restrictive:** deleting a Participant outright must fail loudly rather than void one side of a payment plan.
+  - **Cascade changes are verified by running the statement, not by reading the schema.** `tests/retention.integration.test.ts` runs the delete and fails if the cascade is reverted; extend it when you add a table under `Session`.
 - **Scheduling side is Supabase-side config, not a Prisma migration** — run once, directly against the Supabase SQL Editor:
   ```sql
   create extension if not exists pg_cron with schema pg_catalog;

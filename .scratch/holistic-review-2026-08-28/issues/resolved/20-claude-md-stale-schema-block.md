@@ -1,4 +1,4 @@
-Status: fix-on-touch (was: ready-for-agent)
+Status: resolved
 Severity: Medium
 Category: Best-Practice
 
@@ -25,3 +25,9 @@ Known additions since this ticket was filed:
 - `lib/expenseSession.ts` now also exports `MAX_EXPENSES_PER_SESSION` (tickets 28/34), and its helper was renamed to `loadExpenseSessionContext` (ticket 32). CLAUDE.md's one-line description of that module names neither.
 
 The root cause named above still stands: a schema duplicated into prose drifts independently of the schema. Replacing the inline block with a pointer to `prisma/schema.prisma` would end this class of ticket rather than resetting its clock.
+
+**2026-11-13 — resolved, using the root-cause fix this ticket suggested.** The Data Model section no longer copies the schema. It now points at `prisma/schema.prisma` and lists only the invariants the schema doesn't state on its own: cascade scope, `sort_order` vs `created_at`, the `payment_details` encoding, the single `qr_object_path` slot, and quantity-only fields. Changes and checks:
+- **Project Structure:** re-diffed against `find app lib components tests schemas`, rather than this ticket's enumerated list. It now names every source file, including `app/[sessionId]/_components/`, `lib/prismaErrors.ts`, `tests/retention.integration.test.ts`, and `expenseSession.ts`'s `loadExpenseSessionContext()`/`MAX_EXPENSES_PER_SESSION`.
+- **API Routes:** gained the three `/qr` endpoints.
+- **Verification:** a reverse check (every file under those dirs appears in the tree) passes, and every function the tree names was grepped as an export.
+- **Found during:** the 2026-11-13 prompt audit (`.scratch/plans/prompt-audit-2026-11-13.md`).

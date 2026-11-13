@@ -19,7 +19,7 @@ three `05`s, three `07`s, two `13`s):
 | `v1` | `v1-hardening-audit/issues/` |
 | `qr` | `v2-qr-ph-upload/issues/` |
 
-Resolved tickets live in each directory's own `issues/resolved/` and are not listed here (43 of them).
+Resolved tickets live in each directory's own `issues/resolved/` and are not listed here (47 of them).
 
 Sequencing, verification commands, and the current resume state live in
 `plans/tier1-review-fixes-27-37.md` (gitignored). This file is the *what*; that one is the *when*.
@@ -223,14 +223,6 @@ comment rule (no ticket numbers in code) — `qr/route.ts:100`, `SettlementProgr
 in `tests/sessions.integration.test.ts`. They are also ambiguous, since the numbers collide across
 directories.
 
-## K · Docs — do LAST
-
-**[h20](holistic-review-2026-08-28/issues/20-claude-md-stale-schema-block.md)** · Medium · CLAUDE.md's schema block contradicts `schema.prisma` and its own prose
-
-h20 absorbed ticket 33 and says to re-diff rather than trust its enumerated list. **Every cluster
-above changes what CLAUDE.md has to say** — a new `lib/money.ts`, possibly a `Settlement.sort_order`
-migration, a renamed helper, new components. Doing this before them guarantees doing it twice.
-
 ## L · Not code — external config or a production check
 
 **[h35](holistic-review-2026-08-28/issues/35-qr-path-guards-not-retroactive.md)** · `needs-info` · production query, **port 5432 not 6543**
@@ -258,7 +250,7 @@ encodes the `/` separators and breaks every valid path. Remediation follows the 
    a scheduled step. **F** (h16, v1-07, h19) and **G** (h11, h12) are similarly demoted.
 6. ~~**E** — the decomposition plan and its three slices.~~ ✅ done 2026-09-13 (see cluster E).
 7. **C** — h36 direction, and by extension h13's transaction. ← **next**
-8. **K** last, once every cluster above has landed and CLAUDE.md needs a real re-diff.
+8. ~~**K** — h20.~~ ✅ done 2026-11-13, ahead of C. The pointer-instead-of-copy fix means later clusters no longer have a schema copy to re-sync.
 
 **H**'s qr-07 and **I**'s h23/qr-06 are demoted to `fix-on-touch`; qr-03 (Medium, `needs-info`) was
 never in scope for demotion. **L** is the user's, not an agent's, and none of it is demoted — h35,
