@@ -20,8 +20,14 @@ A single Next.js app; there is no separate backend service. Route Handlers under
 ```
 divvy-app/
 ├── app/
+│   ├── layout.tsx                            # Root layout — fonts, sticky header with the Divvy wordmark
+│   ├── globals.css                           # Tailwind v4 theme tokens + plain-CSS component classes (token names are historical; see the file's header note)
 │   ├── page.tsx                              # Create session + "Your recent sessions" list
 │   ├── [sessionId]/page.tsx                  # Session view (edit)
+│   ├── [sessionId]/_components/              # Used only by the session page; shared-across-pages pieces live in components/
+│   │   ├── ExpenseForm.tsx                   # Add/edit expense form (all three split types)
+│   │   ├── ExpenseList.tsx                   # Drag-and-drop sortable expense list
+│   │   └── PaymentMethodEditor.tsx           # GCash / Maya / Bank / QR tabs for a participant's payment method
 │   ├── [sessionId]/settle/page.tsx           # Settlement screen
 │   ├── [sessionId]/view/page.tsx             # Read-only participant view
 │   └── api/
@@ -39,109 +45,56 @@ divvy-app/
 │   ├── paymentDetails.ts                     # parseBankDetails()/formatBankDetails() — one shared home for the "Bank Name - Account Number" encoding
 │   ├── fetcher.ts                            # shared SWR fetcher (generic error message parameterized per page)
 │   ├── expenseBreakdown.ts                   # buildParticipantBreakdown() — what one person is charged for; pure, no React
-│   ├── expenseSession.ts                     # loadSessionParticipants()/validatePayer() — shared session-fetch + payer-membership check for expense routes
+│   ├── expenseBreakdown.test.ts              # Vitest unit tests for buildParticipantBreakdown()
+│   ├── expenseSession.ts                     # loadExpenseSessionContext()/validatePayer() + MAX_EXPENSES_PER_SESSION — shared session-fetch, payer-membership check, and expense cap for expense routes
 │   ├── expenseSplits.ts                      # split-building logic for EVEN/CUSTOM/QUANTITY
 │   ├── money.ts                              # distributeCents() — apportions a centavo total across weighted shares
 │   ├── money.test.ts                         # Vitest unit tests for the apportionment, incl. a no-negative/exact-sum sweep
+│   ├── prismaErrors.ts                       # detects Prisma's "row is gone" (P2025) error; each route picks its own status
 │   ├── requestBody.ts                        # parseBody()/parseJsonBody() — shared parse-then-validate-then-400 pipeline for every mutating route
 │   ├── serialize.ts                          # DB row → API response shaping
-│   ├── settlementHelpers.ts                  # shared settlement-plan helpers
+│   ├── sessionPayer.ts                       # deriveSessionPayer()/deriveDefaultPayer() — who fronted a session's expenses; pure
+│   ├── sessionPayer.test.ts                  # Vitest unit tests for sessionPayer.ts
+│   ├── settlementHelpers.ts                  # computeNetBalances()/settlementPlansMatch() — shared by the preview + freeze routes
 │   ├── settle.ts                             # Debt simplification algorithm
 │   ├── settle.test.ts                        # Vitest unit tests, incl. regression coverage for the residual-cent fix
 │   ├── validation.ts                         # requireValidSessionId() and friends
 │   ├── imageCompress.ts                      # client-side <canvas> compression to JPEG before a QR upload
 │   ├── storage.ts                            # Supabase Storage service-role client — signed QR upload URLs, best-effort delete
-│   └── storageUrl.ts                         # publicObjectUrl() — deterministic public Storage URL from an object path
-├── components/
+│   ├── storageUrl.ts                         # publicObjectUrl() — deterministic public Storage URL from an object path
+│   ├── types.ts                              # shared shapes of the JSON the API returns, consumed by every session page
+│   └── useCopyToClipboard.ts                 # one copy-to-clipboard flow with a timed "copied" flash
+├── components/                               # Shared across pages; session-page-only pieces live in app/[sessionId]/_components/
 │   ├── ExpenseBreakdown.tsx                  # collapsible per-person charge list, shared by the settle + view pages
+│   ├── ExpenseRow.tsx                        # one expense's header, split summary line, and per-person breakdown
 │   ├── PaymentAction.tsx                     # payment-method label/display/copy, shared by the settle + view pages
+│   ├── QrFileInput.tsx                       # styled "pick a QR image" file control for the payment-method editor
+│   ├── SessionPayerNote.tsx                  # "{name} fronted the bill" heading, shown instead of "Paid by X" on every row
 │   ├── SessionSummary.tsx                    # bento-tile totals (bill, people, avg/person), shared by the session/settle/view pages
 │   ├── SettlementProgress.tsx                # progress bar (incl. ARIA), shared by the settle + view pages
-│   └── StalePlanBanner.tsx                   # "expenses changed since finalizing" warning, shared by the settle + view pages
+│   ├── StalePlanBanner.tsx                   # "expenses changed since finalizing" warning, shared by the settle + view pages
+│   └── SwapLabel.tsx                         # button text that crossfades between two labels (e.g. Copy → Copied!)
 ├── schemas/
 │   └── sessions.ts                           # Zod schemas for every request body
 ├── prisma/
 │   └── schema.prisma
 ├── prisma.config.ts                          # DB connection for the Prisma CLI
 └── tests/
+    ├── retention.integration.test.ts         # runs the retention DELETE against a real DB to prove the cascades hold
     └── sessions.integration.test.ts          # HTTP-level parity suite against a running dev server (TEST_BASE_URL)
 ```
 
 ## Data Model
 
-```prisma
-model Session {
-  id           String        @id @default(uuid())
-  name         String
-  created_at   DateTime      @default(now())
-  participants Participant[]
-  expenses     Expense[]
-  settlements  Settlement[]
-}
+The schema lives in [`prisma/schema.prisma`](prisma/schema.prisma) — read it there. It is deliberately not copied into this file, so the two can't drift apart. It defines five models (`Session`, `Participant`, `Expense`, `ExpenseSplit`, `Settlement`) and two enums (`SplitType`: `EVEN` / `CUSTOM` / `QUANTITY`; `PaymentMethodType`: `GCASH` / `MAYA` / `BANK_TRANSFER`).
 
-model Participant {
-  id                  String              @id @default(uuid())
-  session_id          String
-  name                String
-  payment_method_type PaymentMethodType?
-  payment_details     String?             // phone number for GCASH/MAYA, "Bank Name - Account Number" for BANK_TRANSFER
-  created_at          DateTime            @default(now())
-  sort_order          Int                 @default(autoincrement()) // keeps participant lists in a stable order; see README for why this can't just be created_at
-  session             Session             @relation(fields: [session_id], references: [id])
-  expenses            Expense[]
-  splits              ExpenseSplit[]
-  owes                Settlement[]        @relation("Debtor")
-  owed                Settlement[]        @relation("Creditor")
-}
+What the schema alone doesn't tell you:
 
-model Expense {
-  id          String         @id @default(uuid())
-  session_id  String
-  paid_by     String
-  amount      Float
-  description String
-  split_type  SplitType
-  quantity    Int?           // total units for a QUANTITY split (e.g. 6 shots); null otherwise
-  sort_order  Int            @default(autoincrement()) // keeps the expense list in a stable order and survives drag-and-drop reordering
-  session     Session        @relation(fields: [session_id], references: [id])
-  payer       Participant    @relation(fields: [paid_by], references: [id])
-  splits      ExpenseSplit[]
-}
-
-model ExpenseSplit {
-  id             String      @id @default(uuid())
-  expense_id     String
-  participant_id String
-  amount_owed    Float
-  units          Int?        // units this participant consumed in a QUANTITY split; null otherwise
-  expense        Expense     @relation(fields: [expense_id], references: [id], onDelete: Cascade)
-  participant    Participant @relation(fields: [participant_id], references: [id])
-}
-
-model Settlement {
-  id          String      @id @default(uuid())
-  session_id  String
-  from_id     String
-  to_id       String
-  amount      Float
-  paid        Boolean     @default(false) // whether this payment has actually been made
-  session     Session     @relation(fields: [session_id], references: [id])
-  debtor      Participant @relation("Debtor", fields: [from_id], references: [id])
-  creditor    Participant @relation("Creditor", fields: [to_id], references: [id])
-}
-
-enum SplitType {
-  EVEN
-  CUSTOM
-  QUANTITY
-}
-
-enum PaymentMethodType {
-  GCASH
-  MAYA
-  BANK_TRANSFER
-}
-```
+- **Deleting a `Session` deletes everything under it.** `Participant`, `Expense`, and `Settlement` cascade from `Session`; `ExpenseSplit` cascades from both `expense` and `participant`. `Settlement.debtor`/`creditor` deliberately do not cascade. See [Data retention](#data-retention) for why both halves matter.
+- **List order comes from `sort_order`, not `created_at`.** `Participant`, `Expense`, and `Settlement` each have an `autoincrement()` `sort_order`, because rows inserted in one transaction share a `created_at` (see README.md). Drag-and-drop reorder rewrites `Expense.sort_order`.
+- **`Participant.payment_details`** holds the phone number for `GCASH`/`MAYA`, or `"Bank Name - Account Number"` for `BANK_TRANSFER`. Encode and decode it only through `lib/paymentDetails.ts`.
+- **`Participant.qr_object_path`** is one shared QR slot, independent of `payment_method_type` — see "QR Ph Code Upload" below.
+- **`Expense.quantity` and `ExpenseSplit.units`** are set only for `QUANTITY` splits and are null otherwise.
 
 ## V1 Features (Strict Scope)
 
@@ -229,6 +182,9 @@ POST   /api/sessions                                         # Create session
 GET    /api/sessions/:sessionId                              # Get session with participants + expenses
 POST   /api/sessions/:sessionId/participants                 # Add participant
 PATCH  /api/sessions/:sessionId/participants/:participantId  # Set own payment method
+POST   /api/sessions/:sessionId/participants/:participantId/qr  # Mint a signed Storage upload URL for a QR image (no body)
+PUT    /api/sessions/:sessionId/participants/:participantId/qr  # Persist the uploaded QR's object path (best-effort deletes the old object)
+DELETE /api/sessions/:sessionId/participants/:participantId/qr  # Remove the participant's QR
 POST   /api/sessions/:sessionId/expenses                     # Add expense
 PATCH  /api/sessions/:sessionId/expenses/:expenseId          # Edit an expense in place (rebuilds its splits)
 PATCH  /api/sessions/:sessionId/expenses                     # Bulk reorder: reassign sort_order from a full ordered id list
@@ -300,7 +256,7 @@ Sessions older than a month are deleted automatically, so old bill-splitting dat
 - **Local dev parity** — the local environment should mirror production as closely as possible; no "works on my machine" gaps
 - **Container runtime:** Podman (not Docker) — use `podman-compose` for compose workflows
 - **Comments:** Every non-trivial line or block gets a simple one-liner comment explaining what it does — code should be readable to someone seeing it for the first time
-- **Code reviews use subagents:** always run a full code review via parallel subagents rather than one inline pass — default is three, split by *lens* (Correctness, Security, Best-Practice/Smells), each auditing the change under review — the diff or commit range, plus the sibling sites of any pattern the diff touches (see "Enumerate the class" in CONTRIBUTING.md) — consolidated into one severity-ranked report. Splitting by lens (not by area, e.g. frontend/backend) avoids "seam-blindness," where a bug living in the contract between two areas falls in the gap between two reviewers who each only look at one side. Spawn them via the `Agent` tool with `subagent_type: correctness-reviewer`, `security-reviewer`, and `best-practice-reviewer` (defined in `~/.claude/agents/`, read-only tool access, `correctness-reviewer`/`security-reviewer` pinned to Opus) — not `general-purpose`. Each agent already knows its lens's checklist; the prompt only needs to carry the review's context (see below), not the lens definition.
+- **Code reviews use subagents:** always run a full code review via parallel subagents rather than one inline pass — default is three, split by *lens* (Correctness, Security, Best-Practice/Smells), each auditing the change under review — the diff or commit range, plus the sibling sites of any pattern the diff touches (see "Before fixing a pattern bug" in CONTRIBUTING.md) — consolidated into one severity-ranked report. Splitting by lens (not by area, e.g. frontend/backend) avoids "seam-blindness," where a bug living in the contract between two areas falls in the gap between two reviewers who each only look at one side. Spawn them via the `Agent` tool with `subagent_type: correctness-reviewer`, `security-reviewer`, and `best-practice-reviewer` (defined in `~/.claude/agents/`, read-only tool access, `correctness-reviewer`/`security-reviewer` pinned to Opus) — not `general-purpose`. Each agent already knows its lens's checklist; the prompt only needs to carry the review's context (see below), not the lens definition.
 
 ### When to run a review
 
